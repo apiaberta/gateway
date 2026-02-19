@@ -6,7 +6,8 @@ const PUBLIC_ROUTES = [
   '/health',
   '/docs',
   '/v1/auth/register',
-  '/v1/auth/verify'
+  '/v1/auth/verify',
+  '/v1/status'
 ]
 
 export async function authenticate(req, reply) {

@@ -7,6 +7,7 @@ import { connectDB } from './db.js'
 import { authRoutes } from './routes/auth.js'
 import { proxyRoutes } from './routes/proxy.js'
 import { adminRoutes } from './routes/admin.js'
+import { statusRoutes } from './routes/status.js'
 import { authenticate } from './plugins/authenticate.js'
 import { config } from './config.js'
 
@@ -56,6 +57,7 @@ await app.register(swaggerUi, {
 
 // Public routes (no auth required)
 await app.register(authRoutes, { prefix: '/v1/auth' })
+await app.register(statusRoutes, { prefix: '/v1' })
 
 // Healthcheck (public)
 app.get('/health', async () => ({ status: 'ok', version: '1.0.0' }))

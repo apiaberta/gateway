@@ -14,6 +14,7 @@ export const config = {
   // Each entry: { prefix, target }
   services: [
     {
+      name:   'Fuel Prices (DGEG)',
       prefix: '/fuel',
       target: process.env.FUEL_SERVICE_URL || 'http://localhost:3001'
     },
