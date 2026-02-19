@@ -19,12 +19,14 @@ export const config = {
       target: process.env.FUEL_SERVICE_URL || 'http://localhost:3001'
     },
     {
-      prefix: '/contracts',
-      target: process.env.CONTRACTS_SERVICE_URL || 'http://localhost:3002'
+      name:   'Weather (IPMA)',
+      prefix: '/ipma',
+      target: process.env.IPMA_SERVICE_URL || 'http://localhost:3002'
     },
     {
-      prefix: '/statistics',
-      target: process.env.STATISTICS_SERVICE_URL || 'http://localhost:3003'
+      name:   'Public Contracts (BASE)',
+      prefix: '/base',
+      target: process.env.BASE_SERVICE_URL || 'http://localhost:3003'
     },
     {
       prefix: '/legislation',
