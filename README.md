@@ -1,76 +1,99 @@
-# API Aberta - Gateway
+# API Aberta — Gateway
 
-The public entry point for all API Aberta services. Handles authentication, rate limiting, routing and usage tracking.
+Ponto de entrada público de todos os serviços da API Aberta. Gere autenticação, rate limiting, routing e logging de uso.
 
-## Architecture
+## Arquitectura
 
 ```
-Client Request
-    │
-    ▼
-[Gateway :3000]
-    │  - Validates X-API-Key
-    │  - Applies rate limits per tier
-    │  - Logs usage to MongoDB
-    │  - Strips API key before forwarding
-    │
-    ├──→ /v1/fuel/*        → fuel-service :3001
-    ├──→ /v1/contracts/*   → contracts-service :3002
-    ├──→ /v1/statistics/*  → statistics-service :3003
-    └──→ /v1/legislation/* → legislation-service :3004
+api.apiaberta.pt (nginx :443)
+         │
+         ▼
+  Gateway :4000 (PM2)
+         │
+         ├──→ /v1/fuel/*        → connector-fuel :3001   ✅ Live
+         ├──→ /v1/contracts/*   → connector-base :3002   🔲 Planned
+         ├──→ /v1/statistics/*  → connector-ine :3003    🔲 Planned
+         └──→ /v1/legislation/* → connector-dre :3004    🔲 Planned
 ```
 
-## Quick start
+**VPS:** 167.99.216.205  
+**Stack:** Node.js 22 + Fastify 5 + MongoDB 7 + PM2 + nginx
+
+## Quick Start (dev)
 
 ```bash
 npm install
 cp .env.example .env
 npm run dev
+# → http://localhost:3000/docs
 ```
 
-Interactive docs available at `http://localhost:3000/docs`
+## Deploy (produção)
 
-## API Key tiers
+```bash
+# No VPS
+cd /root/.openclaw/workspace/gateway
+pm2 start ecosystem.config.cjs
+pm2 save
 
-| Tier  | Requests/min | Requests/day |
-|-------|-------------|-------------|
-| Free  | 60          | 1,000       |
-| Pro   | 600         | 10,000      |
-| Admin | 6,000       | 100,000     |
+# Logs
+pm2 logs apiaberta-gateway
+
+# Restart
+pm2 restart apiaberta-gateway
+```
+
+O `ecosystem.config.cjs` define `PORT=4000`. O nginx faz reverse proxy de `api.apiaberta.pt` para `localhost:4000`.
+
+## Tiers de API Key
+
+| Tier  | Req/min | Req/dia |
+|-------|---------|---------|
+| Free  | 60      | 1.000   |
+| Pro   | 600     | 10.000  |
+| Admin | 6.000   | 100.000 |
 
 ## Endpoints
 
-### Public (no API key required)
-- `GET /health` - service health check
-- `GET /docs` - interactive Swagger documentation
-- `POST /v1/auth/register` - register and get an API key
+### Públicos (sem API key)
+```
+GET  /health               → healthcheck
+GET  /docs                 → Swagger UI
+POST /v1/auth/register     → registar e obter API key
+```
 
-### Authenticated
-- `GET /v1/auth/me` - current account info
-- `GET /v1/fuel/*` - fuel price data
-- `GET /v1/contracts/*` - public procurement data
-- `GET /v1/statistics/*` - national statistics
-- `GET /v1/legislation/*` - official gazette
+### Autenticados (`X-API-Key: <key>`)
+```
+GET  /v1/auth/me           → info da conta
+GET  /v1/fuel/*            → dados de combustíveis (DGEG)
+```
 
 ### Admin only
-- `GET /v1/admin/developers` - list all developers
-- `PATCH /v1/admin/developers/:id/tier` - change tier
-- `DELETE /v1/admin/developers/:id` - deactivate account
-- `GET /v1/admin/usage` - usage statistics
+```
+GET    /v1/admin/developers         → listar todos os developers
+PATCH  /v1/admin/developers/:id/tier → alterar tier
+DELETE /v1/admin/developers/:id     → desactivar conta
+GET    /v1/admin/usage              → estatísticas de uso
+```
 
-## Environment variables
+## Variáveis de ambiente
 
-See `.env.example` for all configuration options.
+| Variável | Descrição | Default |
+|----------|-----------|---------|
+| `PORT` | Porta HTTP | `3000` (prod: `4000` via PM2) |
+| `MONGO_URI` | MongoDB connection string | `mongodb://localhost:27017/apiaberta-gateway` |
+| `JWT_SECRET` | Segredo JWT | — (obrigatório em prod) |
+| `FUEL_SERVICE_URL` | URL interna do connector-fuel | `http://localhost:3001` |
 
-## Adding a new service
+## Adicionar um novo conector
 
-1. Deploy the service (see [service-template](https://github.com/apiaberta/service-template))
-2. Add the service URL to `.env`:
+1. Fazer deploy do conector (ver [service-guidelines](https://github.com/apiaberta/apiaberta/blob/main/docs/service-guidelines.md))
+2. Adicionar URL ao `.env`:
    ```
-   MY_SERVICE_URL=http://my-service:3005
+   MY_SERVICE_URL=http://localhost:3005
    ```
-3. Register the route in `src/config.js`:
+3. Registar a rota em `src/config.js`:
    ```js
-   { prefix: '/my-service', target: process.env.MY_SERVICE_URL }
+   { name: 'My Service', prefix: '/my-service', target: process.env.MY_SERVICE_URL }
    ```
-4. Restart the gateway
+4. `pm2 restart apiaberta-gateway`
