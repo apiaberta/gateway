@@ -8,12 +8,13 @@ export async function connectDB() {
 
 // Developer account
 const developerSchema = new mongoose.Schema({
-  email:     { type: String, required: true, unique: true, lowercase: true },
-  name:      { type: String },
-  apiKey:    { type: String, required: true, unique: true, index: true },
-  tier:      { type: String, enum: ['free', 'pro', 'admin'], default: 'free' },
-  active:    { type: Boolean, default: true },
-  createdAt: { type: Date, default: Date.now }
+  email:        { type: String, required: true, unique: true, lowercase: true },
+  name:         { type: String },
+  passwordHash: { type: String, required: true },
+  apiKey:       { type: String, required: true, unique: true, index: true },
+  tier:         { type: String, enum: ['free', 'pro', 'admin'], default: 'free' },
+  active:       { type: Boolean, default: true },
+  createdAt:    { type: Date, default: Date.now }
 })
 
 // Usage log
