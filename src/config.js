@@ -29,8 +29,13 @@ export const config = {
       target: process.env.BASE_SERVICE_URL || 'http://localhost:3003'
     },
     {
+      name:   'EV Charging Prices',
+      prefix: '/ev',
+      target: process.env.EV_SERVICE_URL || 'http://localhost:3004'
+    },
+    {
       prefix: '/legislation',
-      target: process.env.LEGISLATION_SERVICE_URL || 'http://localhost:3004'
+      target: process.env.LEGISLATION_SERVICE_URL || 'http://localhost:3005'
     }
   ]
 }
