@@ -23,11 +23,11 @@ export const config = {
       prefix: '/ipma',
       target: process.env.IPMA_SERVICE_URL || 'http://localhost:3002'
     },
-    {
-      name:   'Public Contracts (BASE)',
-      prefix: '/base',
-      target: process.env.BASE_SERVICE_URL || 'http://localhost:3003'
-    },
+    // {
+    //   name:   'Public Contracts (BASE)',
+    //   prefix: '/base',
+    //   target: process.env.BASE_SERVICE_URL || 'http://localhost:3003'
+    // },
     {
       name:   'EV Charging Prices',
       prefix: '/ev',
