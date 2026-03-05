@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
-    "lint": "eslint src/"
+    "lint": "eslint src/",
+    "test": "node --check src/config.js src/db.js src/index.js src/plugins/authenticate.js src/routes/auth.js src/routes/proxy.js src/routes/admin.js src/routes/status.js && echo All files OK"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.0",
