@@ -1,6 +1,7 @@
 import 'dotenv/config'
 import Fastify from 'fastify'
 import cors from '@fastify/cors'
+import helmet from '@fastify/helmet'
 import rateLimit from '@fastify/rate-limit'
 import swagger from '@fastify/swagger'
 import swaggerUi from '@fastify/swagger-ui'
@@ -20,12 +21,18 @@ const app = Fastify({
   }
 })
 
-// Plugins
+// Security headers
+await app.register(helmet, {
+  contentSecurityPolicy: false // allow Swagger UI to load
+})
+
+// CORS
 await app.register(cors, { origin: true })
 
+// Rate limiting — 30 req/min for unauthenticated IPs, 300 for API key holders
 await app.register(rateLimit, {
   global: true,
-  max: 60,
+  max: (req) => req.headers['x-api-key'] ? 300 : 30,
   timeWindow: '1 minute',
   keyGenerator: (req) => req.headers['x-api-key'] || req.ip,
   errorResponseBuilder: () => ({
