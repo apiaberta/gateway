@@ -8,6 +8,8 @@ const PUBLIC_ROUTES = [
   '/v1/auth/register',
   '/v1/auth/login',
   '/v1/auth/forgot-password',
+  '/v1/auth/usage',
+  '/v1/auth/me',
   '/v1/status',
   '/v1/fuel',
   '/v1/ipma',
