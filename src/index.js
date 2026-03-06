@@ -11,6 +11,7 @@ import { proxyRoutes } from './routes/proxy.js'
 import { adminRoutes } from './routes/admin.js'
 import { statusRoutes } from './routes/status.js'
 import { authenticate } from './plugins/authenticate.js'
+import { sanitizePlugin } from './plugins/sanitize.js'
 import { config } from './config.js'
 
 const app = Fastify({
@@ -41,6 +42,9 @@ await app.register(rateLimit, {
     statusCode: 429
   })
 })
+
+// MongoDB injection protection
+await app.register(sanitizePlugin)
 
 await app.register(swagger, {
   openapi: {
