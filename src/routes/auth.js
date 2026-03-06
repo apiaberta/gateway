@@ -1,7 +1,7 @@
 import { nanoid } from 'nanoid'
 import bcrypt from 'bcrypt'
 import jwt from 'jsonwebtoken'
-import { Developer } from '../db.js'
+import { Developer, UsageLog } from '../db.js'
 import { config } from '../config.js'
 
 const SALT_ROUNDS = 10
@@ -119,7 +119,65 @@ export async function authRoutes(app) {
     return { name: dev.name, email: dev.email, tier: dev.tier, apiKey: dev.apiKey, createdAt: dev.createdAt }
   })
 
-  // POST /v1/auth/forgot-password (placeholder)
+  // GET /v1/auth/usage — usage stats for the authenticated developer
+  app.get('/usage', {
+    schema: {
+      description: 'Your API usage stats for the last 30 days',
+      tags: ['Auth'],
+      security: [{ apiKey: [] }]
+    },
+    config: { public: true }
+  }, async (req, reply) => {
+    // Accept JWT or API key
+    let apiKey = null
+
+    const authHeader = req.headers['authorization']
+    if (authHeader?.startsWith('Bearer ')) {
+      try {
+        const payload = jwt.verify(authHeader.slice(7), config.jwtSecret)
+        const dev = await Developer.findById(payload.id)
+        if (!dev) return reply.code(404).send({ error: 'Not Found' })
+        apiKey = dev.apiKey
+      } catch {
+        return reply.code(401).send({ error: 'Unauthorized', message: 'Invalid token' })
+      }
+    } else if (req.developer) {
+      apiKey = req.developer.apiKey
+    } else {
+      return reply.code(401).send({ error: 'Unauthorized' })
+    }
+
+    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+
+    const gteSince = { $gte: since }
+    const matchQuery = { apiKey, timestamp: gteSince }
+
+    const [total, byDay, byEndpoint] = await Promise.all([
+      UsageLog.countDocuments({ apiKey, timestamp: gteSince }),
+      UsageLog.aggregate([
+        { $match: matchQuery },
+        { $group: {
+          _id: { $dateToString: { format: '%Y-%m-%d', date: '$timestamp' } },
+          count: { $sum: 1 }
+        }},
+        { $sort: { _id: 1 } }
+      ]),
+      UsageLog.aggregate([
+        { $match: matchQuery },
+        { $group: { _id: '$endpoint', count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $limit: 10 }
+      ])
+    ])
+
+    return {
+      total_30d:   total,
+      by_day:      byDay.map(d => ({ date: d._id, count: d.count })),
+      by_endpoint: byEndpoint.map(e => ({ endpoint: e._id, count: e.count }))
+    }
+  })
+
+  // POST /v1/auth/forgot-password (placeholder — needs email credentials)
   app.post('/forgot-password', {
     schema: {
       description: 'Request a password reset link',
