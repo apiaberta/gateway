@@ -32,6 +32,16 @@ export const config = {
       name:   'EV Charging Prices',
       prefix: '/ev',
       target: process.env.EV_SERVICE_URL || 'http://localhost:3004'
+    },
+    {
+      name:   'Portugal Statistics (INE/Eurostat)',
+      prefix: '/ine',
+      target: process.env.INE_SERVICE_URL || 'http://localhost:3005'
+    },
+    {
+      name:   'Civil Protection (ANPC)',
+      prefix: '/anpc',
+      target: process.env.ANPC_SERVICE_URL || 'http://localhost:3006'
     }
   ]
 }
