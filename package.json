@@ -1,6 +1,6 @@
 {
   "name": "@apiaberta/gateway",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "API Aberta gateway - authentication, rate limiting, routing",
   "type": "module",
   "main": "src/index.js",
@@ -13,7 +13,6 @@
   "dependencies": {
     "@fastify/cors": "^10.0.0",
     "@fastify/helmet": "^13.0.2",
-    "@fastify/http-proxy": "^10.0.0",
     "@fastify/rate-limit": "^10.0.0",
     "@fastify/swagger": "^9.0.0",
     "@fastify/swagger-ui": "^5.0.0",

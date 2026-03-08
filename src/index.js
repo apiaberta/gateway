@@ -72,7 +72,7 @@ await app.register(authRoutes, { prefix: '/v1/auth' })
 await app.register(statusRoutes, { prefix: '/v1' })
 
 // Healthcheck (public)
-app.get('/health', async () => ({ status: 'ok', version: '1.0.0' }))
+app.get('/health', async () => ({ status: 'ok', version: '0.2.0' }))
 
 // Protected routes (API key required)
 app.addHook('onRequest', authenticate)

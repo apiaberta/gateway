@@ -1,4 +1,5 @@
 import { Developer, UsageLog } from '../db.js'
+import { cacheStats } from '../plugins/cache.js'
 
 export async function adminRoutes(app) {
 
@@ -33,6 +34,11 @@ export async function adminRoutes(app) {
   app.delete('/developers/:id', async (req, reply) => {
     await Developer.findByIdAndUpdate(req.params.id, { active: false })
     return { success: true }
+  })
+
+  // GET /v1/admin/cache — cache stats
+  app.get('/cache', async () => {
+    return { cache: cacheStats() }
   })
 
   // GET /v1/admin/usage - usage stats

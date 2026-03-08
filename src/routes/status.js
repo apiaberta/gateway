@@ -23,7 +23,7 @@ export async function statusRoutes(app) {
       gateway:  {
         status:   'up',
         uptime_s: Math.floor((Date.now() - GATEWAY_START) / 1000),
-        version:  '1.0.0'
+        version:  '0.2.0'
       },
       services: checks,
       checked_at: new Date().toISOString()
