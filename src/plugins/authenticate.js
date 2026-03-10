@@ -1,3 +1,4 @@
+import jwt from 'jsonwebtoken'
 import { Developer, UsageLog } from '../db.js'
 import { config } from '../config.js'
 
@@ -26,6 +27,26 @@ export async function authenticate(req, reply) {
   // Skip auth for public routes
   if (PUBLIC_ROUTES.some(r => req.url.startsWith(r))) return
 
+  // Try Bearer JWT first (used by the dev portal frontend)
+  const authHeader = req.headers['authorization']
+  if (authHeader?.startsWith('Bearer ')) {
+    try {
+      const payload = jwt.verify(authHeader.slice(7), config.jwtSecret)
+      const developer = await Developer.findById(payload.id)
+      if (!developer || !developer.active) {
+        return reply.code(401).send({ error: 'Unauthorized', message: 'Invalid or expired token' })
+      }
+      req.developer = developer
+      const limits = config.tiers[developer.tier]
+      reply.header('X-RateLimit-Tier', developer.tier)
+      reply.header('X-RateLimit-Limit', limits.rpm)
+      return
+    } catch {
+      return reply.code(401).send({ error: 'Unauthorized', message: 'Invalid or expired token' })
+    }
+  }
+
+  // Fall back to API key
   const apiKey = req.headers['x-api-key']
 
   if (!apiKey) {
@@ -44,15 +65,12 @@ export async function authenticate(req, reply) {
     })
   }
 
-  // Attach developer to request
   req.developer = developer
 
-  // Apply tier-specific rate limit override
   const limits = config.tiers[developer.tier]
   reply.header('X-RateLimit-Tier', developer.tier)
   reply.header('X-RateLimit-Limit', limits.rpm)
 
-  // Log usage asynchronously (don't block the request)
   setImmediate(async () => {
     try {
       await UsageLog.create({
