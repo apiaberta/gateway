@@ -17,7 +17,8 @@ const PUBLIC_ROUTES = [
   '/v1/ev',
   '/v1/ine',
   '/v1/anpc',
-  '/v1/bdp'
+  '/v1/bdp',
+  '/v1/webhooks/events'
 ]
 
 export async function authenticate(req, reply) {
