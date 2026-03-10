@@ -72,7 +72,7 @@ export async function adminRoutes(app) {
 
   // Aliases /users → /developers (compatibilidade dev portal)
   app.get('/users', async (req, reply) => {
-    const developers = await Developer.find({}, '-passwordHash').sort({ createdAt: -1 })
+    const developers = await Developer.find({}, '-passwordHash -apiKey').sort({ createdAt: -1 })
     return { count: developers.length, developers }
   })
 
