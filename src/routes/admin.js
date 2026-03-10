@@ -69,4 +69,25 @@ export async function adminRoutes(app) {
 
     return { total, byEndpoint, byKey }
   })
+
+  // Aliases /users → /developers (compatibilidade dev portal)
+  app.get('/users', async (req, reply) => {
+    const developers = await Developer.find({}, '-passwordHash').sort({ createdAt: -1 })
+    return { count: developers.length, developers }
+  })
+
+  app.patch('/users/:id', async (req, reply) => {
+    const { tier, active } = req.body
+    const update = {}
+    if (tier !== undefined) {
+      if (!['free', 'pro', 'admin'].includes(tier))
+        return reply.code(400).send({ error: 'Invalid tier' })
+      update.tier = tier
+    }
+    if (active !== undefined) update.active = active
+    const dev = await Developer.findByIdAndUpdate(req.params.id, update, { new: true })
+    if (!dev) return reply.code(404).send({ error: 'Not found' })
+    return { success: true, developer: dev }
+  })
+
 }
