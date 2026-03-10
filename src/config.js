@@ -46,7 +46,7 @@ export const config = {
     {
       name:   'Banco de Portugal (BdP)',
       prefix: '/bdp',
-      target: process.env.BDP_SERVICE_URL || 'http://localhost:3007'
+      target: process.env.BDP_SERVICE_URL || 'http://localhost:3008'
     }
   ]
 }
