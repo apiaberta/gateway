@@ -10,6 +10,7 @@ import { authRoutes } from './routes/auth.js'
 import { proxyRoutes } from './routes/proxy.js'
 import { adminRoutes } from './routes/admin.js'
 import { statusRoutes } from './routes/status.js'
+import { statsRoutes } from './routes/stats.js'
 import { webhookRoutes } from './routes/webhooks.js'
 import { authenticate } from './plugins/authenticate.js'
 import { sanitizePlugin } from './plugins/sanitize.js'
@@ -72,6 +73,7 @@ await app.register(swaggerUi, {
 // Public routes (no auth required)
 await app.register(authRoutes, { prefix: '/v1/auth' })
 await app.register(statusRoutes, { prefix: '/v1' })
+await app.register(statsRoutes,  { prefix: '/v1' })
 
 // Healthcheck (public)
 app.get('/health', async () => ({ status: 'ok', version: '0.3.0' }))
