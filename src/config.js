@@ -48,5 +48,10 @@ export const config = {
       prefix: '/bdp',
       target: process.env.BDP_SERVICE_URL || 'http://localhost:3008'
     }
+    {
+      name:   'Public Contracts alias (BASE)',
+      prefix: '/contracts',
+      target: process.env.BASE_SERVICE_URL || 'http://localhost:3003'
+    },
   ]
 }

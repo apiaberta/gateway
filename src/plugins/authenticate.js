@@ -20,6 +20,7 @@ const PUBLIC_ROUTES = [
   '/v1/anpc',
   '/v1/bdp',
   '/v1/webhooks/events',
+  '/v1/contracts',
   '/v1/stats'
 ]
 
