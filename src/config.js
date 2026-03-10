@@ -47,7 +47,7 @@ export const config = {
       name:   'Banco de Portugal (BdP)',
       prefix: '/bdp',
       target: process.env.BDP_SERVICE_URL || 'http://localhost:3008'
-    }
+    },
     {
       name:   'Public Contracts alias (BASE)',
       prefix: '/contracts',
