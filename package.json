@@ -1,6 +1,6 @@
 {
   "name": "@apiaberta/gateway",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "API Aberta gateway - authentication, rate limiting, routing",
   "type": "module",
   "main": "src/index.js",

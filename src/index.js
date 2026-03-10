@@ -10,8 +10,10 @@ import { authRoutes } from './routes/auth.js'
 import { proxyRoutes } from './routes/proxy.js'
 import { adminRoutes } from './routes/admin.js'
 import { statusRoutes } from './routes/status.js'
+import { webhookRoutes } from './routes/webhooks.js'
 import { authenticate } from './plugins/authenticate.js'
 import { sanitizePlugin } from './plugins/sanitize.js'
+import { processPendingDeliveries, pollForEvents } from './plugins/webhook-worker.js'
 import { config } from './config.js'
 
 const app = Fastify({
@@ -72,14 +74,34 @@ await app.register(authRoutes, { prefix: '/v1/auth' })
 await app.register(statusRoutes, { prefix: '/v1' })
 
 // Healthcheck (public)
-app.get('/health', async () => ({ status: 'ok', version: '0.2.0' }))
+app.get('/health', async () => ({ status: 'ok', version: '0.3.0' }))
 
 // Protected routes (API key required)
 app.addHook('onRequest', authenticate)
 
-await app.register(proxyRoutes, { prefix: '/v1' })
-await app.register(adminRoutes, { prefix: '/v1/admin' })
+await app.register(proxyRoutes,   { prefix: '/v1' })
+await app.register(adminRoutes,   { prefix: '/v1/admin' })
+await app.register(webhookRoutes, { prefix: '/v1/webhooks' })
 
 // Connect DB and start
 await connectDB()
+
+// ─── Webhook worker crons ─────────────────────────────────────────────────────
+// Process pending deliveries every minute
+setInterval(async () => {
+  try { await processPendingDeliveries(app.log) } catch (err) { app.log.error({ err }, 'Webhook delivery worker error') }
+}, 60_000)
+
+// Poll connectors for state changes every 5 minutes
+setInterval(async () => {
+  try { await pollForEvents(app.log) } catch (err) { app.log.error({ err }, 'Webhook event polling error') }
+}, 5 * 60_000)
+
+// Initial poll on startup (delayed 30s to let connectors warm up)
+setTimeout(async () => {
+  try { await pollForEvents(app.log) } catch (err) { app.log.error({ err }, 'Initial webhook event polling error') }
+}, 30_000)
+
+app.log.info('Webhook worker started (delivery every 1min, polling every 5min)')
+
 await app.listen({ port: config.port, host: '0.0.0.0' })

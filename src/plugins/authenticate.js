@@ -16,7 +16,8 @@ const PUBLIC_ROUTES = [
   '/v1/base',
   '/v1/ev',
   '/v1/ine',
-  '/v1/anpc'
+  '/v1/anpc',
+  '/v1/bdp'
 ]
 
 export async function authenticate(req, reply) {

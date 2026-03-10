@@ -42,6 +42,11 @@ export const config = {
       name:   'Civil Protection (ANPC)',
       prefix: '/anpc',
       target: process.env.ANPC_SERVICE_URL || 'http://localhost:3006'
+    },
+    {
+      name:   'Banco de Portugal (BdP)',
+      prefix: '/bdp',
+      target: process.env.BDP_SERVICE_URL || 'http://localhost:3007'
     }
   ]
 }
