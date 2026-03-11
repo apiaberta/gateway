@@ -2,7 +2,7 @@ module.exports = {
   apps: [{
     name: 'apiaberta-gateway',
     script: 'src/index.js',
-    cwd: '/root/apiaberta/gateway',
+    cwd: '/data/apiaberta/gateway',
     instances: 1,
     autorestart: true,
     watch: false,
