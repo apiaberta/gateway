@@ -53,5 +53,10 @@ export const config = {
       prefix: '/contracts',
       target: process.env.BASE_SERVICE_URL || 'http://localhost:3003'
     },
+    {
+      name:   'Geographic Data (geoapi.pt)',
+      prefix: '/geo',
+      target: process.env.GEO_SERVICE_URL || 'http://localhost:3009'
+    },
   ]
 }
