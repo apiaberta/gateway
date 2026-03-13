@@ -232,10 +232,72 @@ async function pollANPCIncidents(log) {
   }
 }
 
+async function pollBASEContracts(log) {
+  try {
+    const res = await fetch(`${config.services.find(s => s.prefix === '/base')?.target || 'http://localhost:3003'}/contracts?limit=10`)
+    if (!res.ok) return
+    const data = await res.json()
+    const contracts = data.data || []
+
+    const knownIds = new Set(await getState('base.contract.ids') || [])
+    const newContracts = contracts.filter(c => c.id && !knownIds.has(String(c.id)))
+
+    if (newContracts.length > 0) {
+      for (const c of newContracts) {
+        await dispatchEvent('base.contract.new', {
+          id:                String(c.id),
+          description:       c.description,
+          contractingEntity: c.contractingEntity,
+          awarded:           c.awarded,
+          value:             c.value,
+          date:              c.date,
+          type:              c.type
+        })
+        log?.info({ contractId: c.id, value: c.value }, 'New BASE contract event dispatched')
+      }
+
+      const allIds = [...knownIds, ...newContracts.map(c => String(c.id))]
+      // Keep only the most recent 1000 IDs
+      await setState('base.contract.ids', allIds.slice(-1000))
+    }
+  } catch (err) {
+    log?.error({ err }, 'Failed to poll BASE contracts')
+  }
+}
+
+async function pollEVPrices(log) {
+  try {
+    const res = await fetch(`${config.services.find(s => s.prefix === '/ev')?.target || 'http://localhost:3004'}/ev/omie/current`)
+    if (!res.ok) return
+    const data = await res.json()
+
+    // Use the date or period as change signal
+    const period = data.data?.period || data.period || data.date
+    if (!period) return
+
+    const lastPeriod = await getState('ev.omie.period')
+    if (lastPeriod !== period) {
+      const price = data.data?.price_eur_mwh ?? data.price_eur_mwh ?? null
+      await dispatchEvent('ev.prices.updated', {
+        period,
+        price_eur_mwh: price,
+        price_eur_kwh: price ? (price / 1000).toFixed(5) : null,
+        source: 'OMIE'
+      })
+      await setState('ev.omie.period', period)
+      log?.info({ period, price }, 'EV prices update event dispatched')
+    }
+  } catch (err) {
+    log?.error({ err }, 'Failed to poll EV prices')
+  }
+}
+
 export async function pollForEvents(log) {
   await Promise.allSettled([
     pollIPMAWarnings(log),
     pollFuelPrices(log),
-    pollANPCIncidents(log)
+    pollANPCIncidents(log),
+    pollBASEContracts(log),
+    pollEVPrices(log)
   ])
 }

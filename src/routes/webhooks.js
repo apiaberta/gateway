@@ -8,7 +8,9 @@ import { config } from '../config.js'
 export const SUPPORTED_EVENTS = [
   'ipma.warning.new',
   'fuel.prices.updated',
-  'anpc.incident.new'
+  'anpc.incident.new',
+  'base.contract.new',
+  'ev.prices.updated'
 ]
 
 // Resolve developer from JWT Bearer or API key
