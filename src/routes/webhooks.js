@@ -216,6 +216,16 @@ export async function webhookRoutes(app) {
         name: 'anpc.incident.new',
         description: 'Fired when a new civil protection incident is reported',
         payload_fields: ['id', 'type', 'location', 'district', 'status', 'reported_at']
+      },
+      {
+        name: 'base.contract.new',
+        description: 'Fired when a new public contract is published on BASE.gov.pt',
+        payload_fields: ['id', 'description', 'contractingEntity', 'awarded', 'value', 'date', 'type']
+      },
+      {
+        name: 'ev.prices.updated',
+        description: 'Fired when OMIE electricity market prices are updated',
+        payload_fields: ['period', 'price_eur_mwh', 'price_eur_kwh', 'source']
       }
     ]
   }))
