@@ -177,6 +177,40 @@ export async function authRoutes(app) {
     }
   })
 
+  // POST /v1/auth/rotate-key — generate a new API key (requires JWT)
+  app.post('/rotate-key', {
+    schema: {
+      description: 'Rotate your API key. The old key is immediately invalidated.',
+      tags: ['Auth'],
+      security: [{ bearerAuth: [] }]
+    }
+  }, async (req, reply) => {
+    const authHeader = req.headers['authorization']
+    if (!authHeader?.startsWith('Bearer ')) {
+      return reply.code(401).send({ error: 'Unauthorized', message: 'Bearer token required' })
+    }
+
+    let dev
+    try {
+      const payload = jwt.verify(authHeader.slice(7), config.jwtSecret)
+      dev = await Developer.findById(payload.id)
+      if (!dev || !dev.active) {
+        return reply.code(401).send({ error: 'Unauthorized', message: 'Invalid or inactive account' })
+      }
+    } catch {
+      return reply.code(401).send({ error: 'Unauthorized', message: 'Invalid or expired token' })
+    }
+
+    const newApiKey = `ak_${nanoid(32)}`
+    dev.apiKey = newApiKey
+    await dev.save()
+
+    return {
+      apiKey:  newApiKey,
+      message: 'API key rotated successfully. Update your integrations — the old key no longer works.'
+    }
+  })
+
   // POST /v1/auth/forgot-password (placeholder — needs email credentials)
   app.post('/forgot-password', {
     schema: {

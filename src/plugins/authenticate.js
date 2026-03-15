@@ -11,6 +11,7 @@ const PUBLIC_ROUTES = [
   '/v1/auth/forgot-password',
   '/v1/auth/usage',
   '/v1/auth/me',
+  '/v1/auth/rotate-key',
   '/v1/status',
   '/v1/fuel',
   '/v1/ipma',
