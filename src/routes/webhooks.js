@@ -35,6 +35,64 @@ async function resolveDeveloper(req, reply) {
   return reply.code(401).send({ error: 'Unauthorized', message: 'Authentication required (Bearer token or X-API-Key)' })
 }
 
+// Sign a webhook payload with HMAC-SHA256
+function signPayload(secret, payload) {
+  return createHmac('sha256', secret).update(payload).digest('hex')
+}
+
+// Deliver a payload to a webhook URL and persist the result
+async function deliverWebhook({ webhook, event, payload, isTest = false }) {
+  const body = JSON.stringify({
+    id:        `evt_${nanoid(16)}`,
+    event,
+    test:      isTest,
+    timestamp: new Date().toISOString(),
+    data:      payload
+  })
+
+  const signature = signPayload(webhook.secret, body)
+  const deliveryId = nanoid(16)
+
+  let responseCode = null
+  let status = 'failed'
+  let errorMsg = null
+
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 10000)
+    const res = await fetch(webhook.url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-ApiAberta-Event': event,
+        'X-ApiAberta-Delivery': deliveryId,
+        'X-ApiAberta-Signature': `sha256=${signature}`,
+        'User-Agent': 'ApiAberta-Webhooks/1.0'
+      },
+      body,
+      signal: controller.signal
+    })
+    clearTimeout(timer)
+    responseCode = res.status
+    status = res.ok ? 'delivered' : 'failed'
+  } catch (err) {
+    errorMsg = err.message
+    status = 'failed'
+  }
+
+  const delivery = await WebhookDelivery.create({
+    webhookId:    webhook._id,
+    event,
+    status,
+    attempts:     1,
+    responseCode,
+    lastAttempt:  new Date(),
+    error:        errorMsg
+  })
+
+  return { deliveryId: delivery._id, status, responseCode, error: errorMsg }
+}
+
 export async function webhookRoutes(app) {
 
   // POST /v1/webhooks — create subscription
@@ -91,6 +149,60 @@ export async function webhookRoutes(app) {
       active:    webhook.active,
       createdAt: webhook.createdAt,
       note: 'Store the secret securely — it will not be shown again. Use it to verify webhook signatures.'
+    }
+  })
+
+  // POST /v1/webhooks/:id/test — send a test delivery
+  app.post('/:id/test', {
+    schema: {
+      description: 'Send a test webhook delivery to verify your endpoint is working',
+      tags: ['Webhooks'],
+      params: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            deliveryId:   { type: 'string' },
+            webhookId:    { type: 'string' },
+            url:          { type: 'string' },
+            status:       { type: 'string', enum: ['delivered', 'failed'] },
+            responseCode: { type: 'number', nullable: true },
+            error:        { type: 'string', nullable: true },
+            sentAt:       { type: 'string' }
+          }
+        }
+      }
+    }
+  }, async (req, reply) => {
+    const dev = await resolveDeveloper(req, reply)
+    if (reply.sent) return
+
+    const webhook = await Webhook.findOne({ _id: req.params.id, apiKey: dev.apiKey }).lean()
+    if (!webhook) return reply.code(404).send({ error: 'Not Found', message: 'Webhook not found' })
+
+    if (!webhook.active) {
+      return reply.code(400).send({ error: 'Bad Request', message: 'Cannot test an inactive webhook' })
+    }
+
+    const result = await deliverWebhook({
+      webhook,
+      event: 'test.ping',
+      payload: {
+        message: 'This is a test delivery from API Aberta. Your webhook endpoint is working!',
+        webhook_id: webhook._id,
+        webhook_url: webhook.url
+      },
+      isTest: true
+    })
+
+    return {
+      deliveryId:   result.deliveryId,
+      webhookId:    webhook._id,
+      url:          webhook.url,
+      status:       result.status,
+      responseCode: result.responseCode,
+      error:        result.error,
+      sentAt:       new Date().toISOString()
     }
   })
 
@@ -194,7 +306,7 @@ export async function webhookRoutes(app) {
     }
   })
 
-  // GET /v1/webhooks/events — list supported events
+  // GET /v1/webhooks/events — list supported events (must be last GET to avoid /:id conflict)
   app.get('/events', {
     schema: {
       description: 'List supported webhook events',
