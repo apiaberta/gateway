@@ -87,7 +87,7 @@ async function deliverWebhook({ webhook, event, payload, isTest = false }) {
     attempts:     1,
     responseCode,
     lastAttempt:  new Date(),
-    error:        errorMsg
+    responseBody: errorMsg ? `Error: ${errorMsg}` : null
   })
 
   return { deliveryId: delivery._id, status, responseCode, error: errorMsg }
@@ -167,7 +167,7 @@ export async function webhookRoutes(app) {
             url:          { type: 'string' },
             status:       { type: 'string', enum: ['delivered', 'failed'] },
             responseCode: { type: 'number', nullable: true },
-            error:        { type: 'string', nullable: true },
+            error:        { type: ['string', 'null'] },
             sentAt:       { type: 'string' }
           }
         }
