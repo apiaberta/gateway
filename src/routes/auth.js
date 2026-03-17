@@ -211,6 +211,65 @@ export async function authRoutes(app) {
     }
   })
 
+  // PATCH /v1/auth/profile — update name and/or password (requires JWT)
+  app.patch('/profile', {
+    schema: {
+      description: 'Update your profile name and/or password',
+      tags: ['Auth'],
+      security: [{ bearerAuth: [] }],
+      body: {
+        type: 'object',
+        properties: {
+          name:            { type: 'string', minLength: 2, maxLength: 100 },
+          currentPassword: { type: 'string' },
+          newPassword:     { type: 'string', minLength: 8 }
+        }
+      }
+    }
+  }, async (req, reply) => {
+    const authHeader = req.headers['authorization']
+    if (!authHeader?.startsWith('Bearer ')) {
+      return reply.code(401).send({ error: 'Unauthorized', message: 'Bearer token required' })
+    }
+
+    let dev
+    try {
+      const payload = jwt.verify(authHeader.slice(7), config.jwtSecret)
+      dev = await Developer.findById(payload.id)
+      if (!dev || !dev.active) {
+        return reply.code(401).send({ error: 'Unauthorized', message: 'Invalid or inactive account' })
+      }
+    } catch {
+      return reply.code(401).send({ error: 'Unauthorized', message: 'Invalid or expired token' })
+    }
+
+    const { name, currentPassword, newPassword } = req.body || {}
+
+    if (name) {
+      dev.name = name.trim()
+    }
+
+    if (newPassword) {
+      if (!currentPassword) {
+        return reply.code(400).send({ error: 'Bad Request', message: 'currentPassword is required to change your password' })
+      }
+      const valid = await bcrypt.compare(currentPassword, dev.passwordHash)
+      if (!valid) {
+        return reply.code(401).send({ error: 'Unauthorized', message: 'Current password is incorrect' })
+      }
+      dev.passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS)
+    }
+
+    await dev.save()
+
+    return {
+      name:    dev.name,
+      email:   dev.email,
+      tier:    dev.tier,
+      message: 'Profile updated successfully'
+    }
+  })
+
   // POST /v1/auth/forgot-password (placeholder — needs email credentials)
   app.post('/forgot-password', {
     schema: {
