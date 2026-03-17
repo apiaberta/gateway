@@ -28,4 +28,4 @@ jobs:
         run: |
           ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes \
             "$VPS_USER@$VPS_HOST" \
-            "cd /data/apiaberta/$REPO && git pull origin main && npm ci --omit=dev && pm2 restart $PM2 && pm2 save && echo '✅ deployed'"
+            "cd /data/apiaberta/$REPO && git pull origin main && rm -rf node_modules && npm install --omit=dev && pm2 restart $PM2 && pm2 save && echo '✅ deployed'"
