@@ -58,6 +58,7 @@ await app.register(swagger, {
     },
     components: {
       securitySchemes: {
+        bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
         apiKey: { type: 'apiKey', in: 'header', name: 'X-API-Key' }
       }
     },

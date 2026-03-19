@@ -167,7 +167,7 @@ export async function webhookRoutes(app) {
             url:          { type: 'string' },
             status:       { type: 'string', enum: ['delivered', 'failed'] },
             responseCode: { type: 'number', nullable: true },
-            error:        { type: ['string', 'null'] },
+            error:        { type: 'string', nullable: true },
             sentAt:       { type: 'string' }
           }
         }
