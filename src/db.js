@@ -65,3 +65,17 @@ export const UsageLog     = mongoose.model('UsageLog', usageSchema)
 export const Webhook      = mongoose.model('Webhook', webhookSchema)
 export const WebhookDelivery = mongoose.model('WebhookDelivery', webhookDeliverySchema)
 export const EventState   = mongoose.model('EventState', eventStateSchema)
+
+// Password reset token
+const passwordResetSchema = new mongoose.Schema({
+  email:     { type: String, required: true, lowercase: true, index: true },
+  token:     { type: String, required: true, unique: true },
+  expiresAt: { type: Date, required: true },
+  used:      { type: Boolean, default: false },
+  createdAt: { type: Date, default: Date.now }
+})
+
+// Auto-delete expired tokens after 1 hour
+passwordResetSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 })
+
+export const PasswordReset = mongoose.model('PasswordReset', passwordResetSchema)
