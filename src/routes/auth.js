@@ -353,8 +353,6 @@ export async function authRoutes(app) {
       message: 'Password reset successfully. You can now log in with your new password.' 
     }
   })
-}
-
   // DELETE /v1/auth/account — marca conta para eliminação em 30 dias
   app.delete('/account', {
     schema: {
@@ -391,3 +389,4 @@ export async function authRoutes(app) {
       deletionScheduledFor: deletionDate.toISOString()
     }
   })
+}
