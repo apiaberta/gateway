@@ -81,6 +81,13 @@ export async function authRoutes(app) {
     }
 
     const valid = await bcrypt.compare(password, dev.passwordHash)
+
+    // Cancel pending deletion if user logs in
+    if (dev.deletionRequestedAt) {
+      dev.deletionRequestedAt = null
+      dev.deletionScheduledFor = null
+      await dev.save()
+    }
     if (!valid) {
       return reply.code(401).send({ error: 'Unauthorized', message: 'Invalid email or password' })
     }
@@ -347,3 +354,40 @@ export async function authRoutes(app) {
     }
   })
 }
+
+  // DELETE /v1/auth/account — marca conta para eliminação em 30 dias
+  app.delete('/account', {
+    schema: {
+      description: 'Request account deletion (30-day grace period)',
+      tags: ['Auth'],
+      security: [{ bearerAuth: [] }]
+    }
+  }, async (req, reply) => {
+    const authHeader = req.headers['authorization']
+    if (!authHeader?.startsWith('Bearer ')) {
+      return reply.code(401).send({ error: 'Unauthorized', message: 'Bearer token required' })
+    }
+
+    let dev
+    try {
+      const payload = jwt.verify(authHeader.slice(7), config.jwtSecret)
+      dev = await Developer.findById(payload.id)
+      if (!dev || !dev.active) {
+        return reply.code(401).send({ error: 'Unauthorized', message: 'Invalid or inactive account' })
+      }
+    } catch {
+      return reply.code(401).send({ error: 'Unauthorized', message: 'Invalid or expired token' })
+    }
+
+    const now = new Date()
+    const deletionDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000)
+    
+    dev.deletionRequestedAt = now
+    dev.deletionScheduledFor = deletionDate
+    await dev.save()
+
+    return {
+      message: 'Conta marcada para eliminação. Tens 30 dias para cancelar fazendo login.',
+      deletionScheduledFor: deletionDate.toISOString()
+    }
+  })

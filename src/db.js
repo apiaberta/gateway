@@ -14,7 +14,9 @@ const developerSchema = new mongoose.Schema({
   apiKey:       { type: String, required: true, unique: true, index: true },
   tier:         { type: String, enum: ['free', 'pro', 'admin'], default: 'free' },
   active:       { type: Boolean, default: true },
-  createdAt:    { type: Date, default: Date.now }
+  createdAt:    { type: Date, default: Date.now },
+  deletionRequestedAt: { type: Date, default: null },
+  deletionScheduledFor: { type: Date, default: null }
 })
 
 // Usage log
