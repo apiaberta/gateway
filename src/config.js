@@ -63,5 +63,15 @@ export const config = {
       prefix: '/nif',
       target: process.env.NIF_SERVICE_URL || 'http://localhost:3013'
     },
+    {
+      name:   'PRR / PT2030',
+      prefix: '/prr',
+      target: process.env.PRR_SERVICE_URL || 'http://localhost:3014'
+    },
+    {
+      name:   'DRE Legislation',
+      prefix: '/dre',
+      target: process.env.DRE_SERVICE_URL || 'http://localhost:3015'
+    },
   ]
 }
