@@ -58,5 +58,10 @@ export const config = {
       prefix: '/geo',
       target: process.env.GEO_SERVICE_URL || 'http://localhost:3009'
     },
+    {
+      name:   'NIF Validator',
+      prefix: '/nif',
+      target: process.env.NIF_SERVICE_URL || 'http://localhost:3013'
+    },
   ]
 }
