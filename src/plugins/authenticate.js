@@ -27,7 +27,10 @@ const PUBLIC_ROUTES = [
   '/v1/contracts',
   '/v1/stats',
   '/v1/geo',
+  '/v1/pt2030',
   '/v1/nif',
+  '/v1/prr',
+  '/v1/dre',
 ]
 
 export async function authenticate(req, reply) {
