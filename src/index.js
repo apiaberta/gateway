@@ -34,6 +34,7 @@ await app.register(helmet, {
 await app.register(cors, { origin: true })
 
 // Rate limiting — 30 req/min for unauthenticated IPs, 300 for API key holders
+// Auth endpoints are excluded to prevent login lockout during auth loops
 await app.register(rateLimit, {
   global: true,
   max: (req) => req.headers['x-api-key'] ? 300 : 30,
@@ -43,7 +44,8 @@ await app.register(rateLimit, {
     error: 'Too Many Requests',
     message: 'Rate limit exceeded. Upgrade your plan at apiaberta.pt',
     statusCode: 429
-  })
+  }),
+  skip: (req) => req.url.startsWith('/v1/auth/login') || req.url.startsWith('/v1/auth/register')
 })
 
 // MongoDB injection protection
