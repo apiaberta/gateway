@@ -31,6 +31,7 @@ const PUBLIC_ROUTES = [
   '/v1/nif',
   '/v1/prr',
   '/v1/dre',
+  '/v1/nasafirms',
 ]
 
 export async function authenticate(req, reply) {

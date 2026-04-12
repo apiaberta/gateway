@@ -73,5 +73,10 @@ export const config = {
       prefix: '/dre',
       target: process.env.DRE_SERVICE_URL || 'http://localhost:3015'
     },
+    {
+      name:   'NASA FIRMS Fire Hotspots',
+      prefix: '/nasafirms',
+      target: process.env.NASAFIRMS_SERVICE_URL || 'http://localhost:3012'
+    },
   ]
 }
