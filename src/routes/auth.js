@@ -1,7 +1,7 @@
 import { nanoid } from 'nanoid'
 import bcrypt from 'bcrypt'
 import jwt from 'jsonwebtoken'
-import { Developer, UsageLog, PasswordReset } from '../db.js'
+import { Developer, UsageLog, PasswordReset, FailedLogin, RegistrationAttempt } from '../db.js'
 import { config } from '../config.js'
 import { sendPasswordResetEmail } from '../services/email.service.js'
 
@@ -35,6 +35,22 @@ export async function authRoutes(app) {
   }, async (req, reply) => {
     const { name, email, password } = req.body
 
+    // ── Anti-spam: block if IP registered in the last 5 minutes ──
+    const clientIp = (req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim()
+    const regWindow = 5 * 60 * 1000 // 5 minutes
+    const regCutoff = new Date(Date.now() - regWindow)
+
+    const recentReg = await RegistrationAttempt.findOne({
+      ip: clientIp,
+      createdAt: { $gte: regCutoff }
+    })
+    if (recentReg) {
+      return reply.code(429).send({
+        error: 'Too Many Requests',
+        message: 'A registration was just completed from this IP. Please try again in 5 minutes.'
+      })
+    }
+
     const existing = await Developer.findOne({ email })
     if (existing) {
       return reply.code(409).send({
@@ -46,6 +62,9 @@ export async function authRoutes(app) {
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS)
     const apiKey = `ak_${nanoid(32)}`
     const dev = await Developer.create({ name, email, passwordHash, apiKey })
+
+    // Record successful registration for anti-spam
+    await RegistrationAttempt.create({ ip: clientIp, email })
 
     reply.code(201)
     return {
@@ -80,6 +99,22 @@ export async function authRoutes(app) {
       return reply.code(401).send({ error: 'Unauthorized', message: 'Invalid email or password' })
     }
 
+    // ── Brute-force protection: block IP if 5+ failed attempts in 15 min ──
+    const clientIp = (req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim()
+    const windowMs = 15 * 60 * 1000 // 15 minutes
+    const cutoff = new Date(Date.now() - windowMs)
+
+    const recentFailures = await FailedLogin.countDocuments({
+      ip: clientIp,
+      createdAt: { $gte: cutoff }
+    })
+    if (recentFailures >= 5) {
+      return reply.code(429).send({
+        error: 'Too Many Requests',
+        message: 'Too many failed login attempts. Please try again in 15 minutes.'
+      })
+    }
+
     const valid = await bcrypt.compare(password, dev.passwordHash)
 
     // Cancel pending deletion if user logs in
@@ -89,6 +124,8 @@ export async function authRoutes(app) {
       await dev.save()
     }
     if (!valid) {
+      // Record failed attempt
+      await FailedLogin.create({ ip: clientIp, email })
       return reply.code(401).send({ error: 'Unauthorized', message: 'Invalid email or password' })
     }
 

@@ -81,3 +81,24 @@ const passwordResetSchema = new mongoose.Schema({
 passwordResetSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 })
 
 export const PasswordReset = mongoose.model('PasswordReset', passwordResetSchema)
+
+// Failed login attempts (brute-force protection)
+// Tracks IP + email for each failed attempt; auto-expires after 15 min
+const failedLoginSchema = new mongoose.Schema({
+  ip:        { type: String, required: true, index: true },
+  email:     { type: String, required: true },
+  createdAt: { type: Date, default: Date.now, index: true }
+})
+failedLoginSchema.index({ createdAt: 1 }, { expireAfterSeconds: 0 }) // TTL index: auto-delete after expiry
+
+// Registration attempts (anti-spam)
+// Tracks IP for each successful registration; auto-expires after 5 min
+const registrationAttemptSchema = new mongoose.Schema({
+  ip:        { type: String, required: true, index: true },
+  email:     { type: String, required: true },
+  createdAt: { type: Date, default: Date.now, index: true }
+})
+registrationAttemptSchema.index({ createdAt: 1 }, { expireAfterSeconds: 0 }) // TTL index: auto-delete after 5 min
+
+export const FailedLogin        = mongoose.model('FailedLogin', failedLoginSchema)
+export const RegistrationAttempt = mongoose.model('RegistrationAttempt', registrationAttemptSchema)
