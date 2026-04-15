@@ -41,8 +41,8 @@ export async function proxyRoutes(app) {
         }
 
         // ── Build upstream URL ───────────────────────────────────────────────
-        // req.url = '/v1/fuel/stations?...' → strip '/v1' → '/fuel/stations?...'
-        const connectorPath = req.url.replace(/^\/v1/, '')
+        // req.url = '/v1/fuel/prices?...' → strip '/v1' + service prefix → '/prices?...'
+        const connectorPath = req.url.replace(/^\/v1\/[^^\/]+/, '')
         const connectorUrl  = `${target}${connectorPath}`
 
         // ── Forward headers ──────────────────────────────────────────────────
