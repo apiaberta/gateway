@@ -1,4 +1,11 @@
 import { config } from '../config.js'
+import { readFileSync } from 'fs'
+import { fileURLToPath } from 'url'
+import { dirname, join } from 'path'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
+const pkg = JSON.parse(readFileSync(join(__dirname, '../../package.json'), 'utf8'))
 
 const GATEWAY_START = Date.now()
 
@@ -23,7 +30,7 @@ export async function statusRoutes(app) {
       gateway:  {
         status:   'up',
         uptime_s: Math.floor((Date.now() - GATEWAY_START) / 1000),
-        version:  '0.3.2'
+        version:  pkg.version
       },
       services: checks,
       checked_at: new Date().toISOString()
