@@ -69,6 +69,11 @@ export const config = {
       target: process.env.PRR_SERVICE_URL || 'http://localhost:3014'
     },
     {
+      name:   'Portugal 2030',
+      prefix: '/pt2030',
+      target: process.env.PRR_SERVICE_URL || 'http://localhost:3014'
+    },
+    {
       name:   'DRE Legislation',
       prefix: '/dre',
       target: process.env.DRE_SERVICE_URL || 'http://localhost:3015'
