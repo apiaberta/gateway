@@ -51,7 +51,7 @@ export const config = {
     {
       name:   'Public Contracts alias (BASE)',
       prefix: '/contracts',
-      target: process.env.BASE_SERVICE_URL || 'http://localhost:3003'
+      target: process.env.BASE_CONTRACTS_ALIAS_URL || 'http://localhost:3003/base'
     },
     {
       name:   'Geographic Data (geoapi.pt)',
