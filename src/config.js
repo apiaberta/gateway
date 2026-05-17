@@ -26,7 +26,7 @@ export const config = {
     {
       name:   'Public Contracts (BASE)',
       prefix: '/base',
-      target: process.env.BASE_SERVICE_URL || 'http://localhost:3003'
+      target: process.env.BASE_SERVICE_URL || 'http://localhost:3003/base'
     },
     {
       name:   'EV Charging Prices',
