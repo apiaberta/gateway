@@ -24,7 +24,7 @@ jobs:
         run: npm ci
 
       - name: Syntax check
-        run: node --check src/config.js src/db.js src/index.js src/plugins/authenticate.js src/routes/auth.js src/routes/proxy.js src/routes/admin.js src/routes/status.js
+        run: node --check src/config.js src/db.js src/index.js src/plugins/authenticate.js src/plugins/cache.js src/routes/auth.js src/routes/proxy.js src/routes/admin.js src/routes/status.js
 
       - name: Check npm test script exists
         run: npm run test --if-present

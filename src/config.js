@@ -46,7 +46,7 @@ export const config = {
     {
       name:   'Banco de Portugal (BdP)',
       prefix: '/bdp',
-      target: process.env.BDP_SERVICE_URL || 'http://localhost:3007'
+      target: process.env.BDP_SERVICE_URL || 'http://localhost:3008'
     },
     {
       name:   'Public Contracts alias (BASE)',
@@ -82,6 +82,26 @@ export const config = {
       name:   'NASA FIRMS Fire Hotspots',
       prefix: '/nasafirms',
       target: process.env.NASAFIRMS_SERVICE_URL || 'http://localhost:3012'
+    },
+    {
+      name:   'Carris Metropolitana (realtime)',
+      prefix: '/carris',
+      target: process.env.CARRIS_SERVICE_URL || 'http://localhost:3017'
+    },
+    {
+      name:   'Transport schedules (GTFS)',
+      prefix: '/gtfs',
+      target: process.env.GTFS_SERVICE_URL || 'http://localhost:3018'
+    },
+    {
+      name:   'Parlamento (Assembleia da República)',
+      prefix: '/parlamento',
+      target: process.env.PARLAMENTO_SERVICE_URL || 'http://localhost:3019'
+    },
+    {
+      name:   'SNS Transparência',
+      prefix: '/sns',
+      target: process.env.SNS_SERVICE_URL || 'http://localhost:3020'
     },
   ]
 }
