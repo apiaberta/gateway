@@ -27,7 +27,7 @@ Central API gateway for the API Aberta platform. Handles authentication, rate li
 - `POST /v1/auth/api-key` — Generate API key
 - `POST /v1/auth/api-key/refresh` — Rotate API key
 - `DELETE /v1/auth/api-key` — Delete API key
-- All `/v1/*` service routes (fuel, ipma, base, ev, ine, anpc, bdp, geo)
+- All `/v1/*` service routes (fuel, ipma, base, ev, ine, anpc, bdp, geo, nif, prr, dre, nasafirms, carris, gtfs, parlamento, sns)
 
 ## Setup
 
@@ -46,13 +46,21 @@ See `.env.example`.
 
 The gateway routes to these microservices:
 - **/v1/fuel** → DGEG fuel prices
-- **/v1/ipma** → IPMA weather data
+- **/v1/ipma** → IPMA weather data (includes seismic endpoints)
 - **/v1/base** → Public contracts (BASE)
 - **/v1/ev** → EV charging prices
 - **/v1/ine** → Statistics (INE/Eurostat)
 - **/v1/anpc** → Civil protection alerts
 - **/v1/bdp** → Banco de Portugal data
 - **/v1/geo** → Geographic data (geoapi.pt)
+- **/v1/nif** → NIF validator
+- **/v1/prr** → PRR / PT2030
+- **/v1/dre** → DRE legislation
+- **/v1/nasafirms** → NASA FIRMS fire hotspots
+- **/v1/carris** → Carris Metropolitana (realtime)
+- **/v1/gtfs** → Transport schedules (GTFS)
+- **/v1/parlamento** → Parlamento (Assembleia da República)
+- **/v1/sns** → SNS Transparência
 
 ## License
 

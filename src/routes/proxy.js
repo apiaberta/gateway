@@ -2,6 +2,15 @@ import { config } from '../config.js'
 import { getCached, setCached, getTtl } from '../plugins/cache.js'
 
 /**
+ * Connectors expose their own prefix (e.g. /carris/vehicles) and /health,
+ * not /v1/.... Strip the gateway /v1 prefix before forwarding.
+ */
+export function buildConnectorUrl(target, requestUrl) {
+  const connectorPath = requestUrl.replace(/^\/v1/, '')
+  return `${target}${connectorPath}`
+}
+
+/**
  * Proxy routes with in-memory caching.
  *
  * GET requests are cached per URL (not per developer) so that identical
@@ -41,8 +50,7 @@ export async function proxyRoutes(app) {
 
       // ── Build upstream URL ───────────────────────────────────────────────
       // req.url = '/v1/fuel/stations?...' → strip '/v1' → '/fuel/stations?...'
-      const connectorPath = req.url.replace(/^\/v1/, '')
-      const connectorUrl  = `${target}${connectorPath}`
+      const connectorUrl = buildConnectorUrl(target, req.url)
 
       // ── Forward headers ──────────────────────────────────────────────────
       const headers = { ...req.headers }

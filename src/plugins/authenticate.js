@@ -3,7 +3,7 @@ import { Developer, UsageLog } from '../db.js'
 import { config } from '../config.js'
 
 // Routes that don't require an API key
-const PUBLIC_ROUTES = [
+export const PUBLIC_ROUTES = [
   '/health',
   '/docs',
   '/v1/auth/register',
@@ -32,6 +32,10 @@ const PUBLIC_ROUTES = [
   '/v1/prr',
   '/v1/dre',
   '/v1/nasafirms',
+  '/v1/carris',
+  '/v1/gtfs',
+  '/v1/parlamento',
+  '/v1/sns',
 ]
 
 export async function authenticate(req, reply) {

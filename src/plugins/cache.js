@@ -7,7 +7,11 @@
  *   /base   → 1800  (public contracts update slowly)
  *   /ev     → 600   (EV tariffs update infrequently)
  *   /ine    → 3600  (statistics are mostly static)
- *   /anpc   → 60    (civil protection incidents are real-time)
+ *   /anpc        → 60    (civil protection incidents are real-time)
+ *   /carris      → 20    (realtime vehicles/arrivals)
+ *   /gtfs        → 300   (static schedules, default TTL)
+ *   /parlamento  → 1800
+ *   /sns         → 3600
  */
 
 export const CACHE_TTLS = {
@@ -17,6 +21,10 @@ export const CACHE_TTLS = {
   '/ev':   600,
   '/ine':  3600,
   '/anpc': 60,
+  '/carris': 20,
+  '/gtfs': 300,
+  '/parlamento': 1800,
+  '/sns': 3600,
 }
 
 const DEFAULT_TTL = 300 // 5 min fallback
@@ -60,4 +68,4 @@ setInterval(() => {
   for (const [key, entry] of store.entries()) {
     if (now > entry.expires) store.delete(key)
   }
-}, 120_000)
+}, 120_000).unref()

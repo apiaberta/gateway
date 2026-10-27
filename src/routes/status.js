@@ -38,7 +38,11 @@ export async function statusRoutes(app) {
   })
 }
 
-async function checkService({ prefix, target, name }) {
+export function serviceHealthUrl(target) {
+  return `${target}/health`
+}
+
+export async function checkService({ prefix, target, name }) {
   const label = name || prefix.replace('/', '')
   const start = Date.now()
 
@@ -46,7 +50,7 @@ async function checkService({ prefix, target, name }) {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 5000)
 
-    const res = await fetch(`${target}/health`, {
+    const res = await fetch(serviceHealthUrl(target), {
       signal: controller.signal
     })
     clearTimeout(timeout)
