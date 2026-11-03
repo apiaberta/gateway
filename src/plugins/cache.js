@@ -8,6 +8,14 @@
  *   /ev     → 600   (EV tariffs update infrequently)
  *   /ine    → 3600  (statistics are mostly static)
  *   /anpc        → 60    (civil protection incidents are real-time)
+ *   /bdp         → 3600  (BdP rates sync once a day)
+ *   /contracts   → 1800  (same data as /base)
+ *   /geo         → 3600  (administrative geography)
+ *   /nif         → 300   (validation is cheap; company lookup can change)
+ *   /prr         → 3600  (static programme catalogue)
+ *   /pt2030      → 3600  (same connector as /prr)
+ *   /dre         → 600   (legislation search)
+ *   /nasafirms   → 300   (satellite hotspots, 24h window)
  *   /carris      → 20    (realtime vehicles/arrivals)
  *   /gtfs        → 300   (static schedules, default TTL)
  *   /parlamento  → 1800
@@ -21,6 +29,14 @@ export const CACHE_TTLS = {
   '/ev':   600,
   '/ine':  3600,
   '/anpc': 60,
+  '/bdp': 3600,
+  '/contracts': 1800,
+  '/geo': 3600,
+  '/nif': 300,
+  '/prr': 3600,
+  '/pt2030': 3600,
+  '/dre': 600,
+  '/nasafirms': 300,
   '/carris': 20,
   '/gtfs': 300,
   '/parlamento': 1800,
