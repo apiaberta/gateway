@@ -6,8 +6,35 @@ import { getCached, setCached, getTtl } from '../plugins/cache.js'
  * not /v1/.... Strip the gateway /v1 prefix before forwarding.
  */
 export function buildConnectorUrl(target, requestUrl) {
-  const connectorPath = requestUrl.replace(/^\/v1/, '')
+  const connectorPath = rewritePublicPath(requestUrl).replace(/^\/v1/, '')
   return `${target}${connectorPath}`
+}
+
+/**
+ * Public aliases advertised by older llms.txt / SDK samples.
+ * /v1/ipma/forecast → /v1/ipma/forecasts (does not rewrite /forecasts).
+ */
+export function rewritePublicPath(requestUrl) {
+  return requestUrl.replace(
+    /^(\/v1)?\/ipma\/forecast(?=\/|\?|$)/,
+    (_, prefix) => `${prefix || ''}/ipma/forecasts`
+  )
+}
+
+/**
+ * Cloudflare (or other HTML) 5xx pages should not leak to API clients.
+ */
+export function isOpaqueUpstreamError(status, body, contentType = '') {
+  if (status < 500) return false
+  const text = String(body || '')
+  const type = String(contentType || '')
+  if (type.includes('text/html')) return true
+  return (
+    text.includes('developers.cloudflare.com') ||
+    text.includes('cf-error') ||
+    text.includes('Error 502: Bad gateway') ||
+    text.includes('<html')
+  )
 }
 
 /**
@@ -33,8 +60,9 @@ export async function proxyRoutes(app) {
     // Shared handler for this service — used by both the root route
     // and the wildcard route.
     const handler = async (req, reply) => {
-      // Cache key: method + full request URL (includes query string)
-      const cacheKey = `${req.method}:${req.url}`
+      // Cache key: method + rewritten public URL (aliases share the same entry)
+      const publicUrl = rewritePublicPath(req.url)
+      const cacheKey = `${req.method}:${publicUrl}`
 
       // ── Cache read (GET only) ────────────────────────────────────────────
       if (req.method === 'GET') {
@@ -50,7 +78,7 @@ export async function proxyRoutes(app) {
 
       // ── Build upstream URL ───────────────────────────────────────────────
       // req.url = '/v1/fuel/stations?...' → strip '/v1' → '/fuel/stations?...'
-      const connectorUrl = buildConnectorUrl(target, req.url)
+      const connectorUrl = buildConnectorUrl(target, publicUrl)
 
       // ── Forward headers ──────────────────────────────────────────────────
       const headers = { ...req.headers }
@@ -88,6 +116,15 @@ export async function proxyRoutes(app) {
 
       const contentType  = upstream.headers.get('content-type') || 'application/json'
       const responseBody = await upstream.text()
+
+      if (isOpaqueUpstreamError(upstream.status, responseBody, contentType)) {
+        app.log.error({ connectorUrl, status: upstream.status }, 'Opaque upstream error')
+        return reply.code(502).send({
+          error: 'Bad Gateway',
+          message: 'Upstream service unavailable',
+          service: prefix.replace('/', '')
+        })
+      }
 
       // ── Cache write (successful GET only) ──────────────────────────────
       if (req.method === 'GET' && upstream.ok) {

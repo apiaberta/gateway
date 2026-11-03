@@ -1,7 +1,14 @@
+import { readFileSync } from 'fs'
+import { fileURLToPath } from 'url'
+import { dirname, join } from 'path'
+
+const pkg = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../package.json'), 'utf8'))
+
 export const config = {
   port: parseInt(process.env.PORT || '3000'),
   mongoUri: process.env.MONGO_URI || 'mongodb://localhost:27017/apiaberta-gateway',
   jwtSecret: process.env.JWT_SECRET || 'change-me-in-production',
+  version: pkg.version,
 
   // Rate limits per tier (requests per minute)
   tiers: {
