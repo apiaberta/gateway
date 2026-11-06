@@ -8,6 +8,7 @@ Central API gateway for the API Aberta platform. Handles authentication, rate li
 - API key management (free/pro/admin tiers)
 - Rate limiting per tier
 - Health checks & status endpoint
+- 90-day uptime history (status page)
 - Service discovery & routing
 
 ## Endpoints
@@ -18,7 +19,9 @@ Central API gateway for the API Aberta platform. Handles authentication, rate li
 - `POST /v1/auth/login` — Login
 - `POST /v1/auth/refresh` — Refresh token
 - `DELETE /v1/auth/account` — Delete account
-- `GET /v1/status` — System status
+- `GET /v1/status` — Live system status
+- `GET /v1/status/history?days=90` — Daily uptime (max 365 days, Europe/Lisbon)
+- `GET /v1/status/incidents?days=90` — Degraded/down incidents in the window
 
 ### Protected Routes
 
@@ -61,6 +64,20 @@ The gateway routes to these microservices:
 - **/v1/gtfs** → Transport schedules (GTFS)
 - **/v1/parlamento** → Parlamento (Assembleia da República)
 - **/v1/sns** → SNS Transparência
+
+## Status history
+
+A background job (every 60s) reuses the same health check as `GET /v1/status` and stores results in the gateway MongoDB (`MONGO_URI`, database `apiaberta-gateway`):
+
+- `status_checks` — raw samples (TTL 95 days)
+- `status_daily` — per-service daily aggregates (`date` is `YYYY-MM-DD` in `Europe/Lisbon`; no TTL)
+- `status_incidents` — opened when a service becomes `down`/`degraded`, closed when it returns to `up`
+
+Only one process runs the collector (Mongo lock), so PM2 cluster mode does not double-sample. `GET /v1/status` is unchanged: it still probes services live and does not read or write history.
+
+Uptime is `(up + 0.5 × degraded) / checks`. History and incident endpoints are public, CORS-enabled like `/v1/status`, and sent with `Cache-Control: public, max-age=30`.
+
+OpenAPI for these routes is published at `/docs`.
 
 ## License
 

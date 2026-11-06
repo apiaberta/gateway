@@ -102,3 +102,51 @@ registrationAttemptSchema.index({ createdAt: 1 }, { expireAfterSeconds: 0 }) // 
 
 export const FailedLogin        = mongoose.model('FailedLogin', failedLoginSchema)
 export const RegistrationAttempt = mongoose.model('RegistrationAttempt', registrationAttemptSchema)
+
+// ─── Status history (uptime page) ─────────────────────────────────────────────
+// Raw samples live 95 days; daily aggregates and incidents are kept indefinitely.
+
+const STATUS_VALUES = ['up', 'degraded', 'down']
+
+const statusCheckSchema = new mongoose.Schema({
+  service:   { type: String, required: true, index: true },
+  status:    { type: String, enum: STATUS_VALUES, required: true },
+  latencyMs: { type: Number, required: true },
+  timestamp: { type: Date, required: true }
+}, { collection: 'status_checks' })
+
+statusCheckSchema.index({ timestamp: 1 }, { expireAfterSeconds: 95 * 24 * 60 * 60 })
+statusCheckSchema.index({ service: 1, timestamp: -1 })
+
+const statusDailySchema = new mongoose.Schema({
+  service:      { type: String, required: true },
+  date:         { type: String, required: true }, // YYYY-MM-DD in Europe/Lisbon
+  checks:       { type: Number, default: 0 },
+  up:           { type: Number, default: 0 },
+  degraded:     { type: Number, default: 0 },
+  down:         { type: Number, default: 0 },
+  avgLatencyMs: { type: Number, default: 0 }
+}, { collection: 'status_daily' })
+
+statusDailySchema.index({ service: 1, date: 1 }, { unique: true })
+statusDailySchema.index({ date: 1 })
+
+const statusIncidentSchema = new mongoose.Schema({
+  service:    { type: String, required: true, index: true },
+  status:     { type: String, enum: ['degraded', 'down'], required: true },
+  startedAt:  { type: Date, required: true, index: true },
+  resolvedAt: { type: Date, default: null, index: true }
+}, { collection: 'status_incidents' })
+
+statusIncidentSchema.index({ service: 1, resolvedAt: 1 })
+
+const statusLockSchema = new mongoose.Schema({
+  _id:         { type: String },
+  owner:       { type: String, required: true },
+  lockedUntil: { type: Date, required: true }
+}, { collection: 'status_locks' })
+
+export const StatusCheck    = mongoose.model('StatusCheck', statusCheckSchema)
+export const StatusDaily    = mongoose.model('StatusDaily', statusDailySchema)
+export const StatusIncident = mongoose.model('StatusIncident', statusIncidentSchema)
+export const StatusLock     = mongoose.model('StatusLock', statusLockSchema)

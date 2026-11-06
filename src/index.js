@@ -15,6 +15,7 @@ import { webhookRoutes } from './routes/webhooks.js'
 import { authenticate } from './plugins/authenticate.js'
 import { sanitizePlugin } from './plugins/sanitize.js'
 import { processPendingDeliveries, pollForEvents } from './plugins/webhook-worker.js'
+import { startStatusCollector } from './plugins/status-collector.js'
 import { config } from './config.js'
 
 const app = Fastify({
@@ -108,5 +109,8 @@ setTimeout(async () => {
 }, 30_000)
 
 app.log.info('Webhook worker started (delivery every 1min, polling every 5min)')
+
+// Status history collector — independent of GET /v1/status (does not run on that path)
+startStatusCollector(app.log)
 
 await app.listen({ port: config.port, host: '0.0.0.0' })
