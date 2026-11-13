@@ -4,10 +4,26 @@ import { dirname, join } from 'path'
 
 const pkg = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../package.json'), 'utf8'))
 
+const DEV_JWT_SECRET = 'change-me-in-production'
+
+/**
+ * JWT signing secret from the environment. Outside production a built-in dev
+ * value is allowed so `npm run dev` works without setup. In production the
+ * secret must be set and must not be the dev value or the .env.example
+ * placeholder, otherwise anyone could forge tokens.
+ */
+export function resolveJwtSecret(env = process.env) {
+  const secret = env.JWT_SECRET
+  if (env.NODE_ENV === 'production' && (!secret || secret.startsWith('change-me'))) {
+    throw new Error('JWT_SECRET must be set to a strong random value when NODE_ENV=production')
+  }
+  return secret || DEV_JWT_SECRET
+}
+
 export const config = {
   port: parseInt(process.env.PORT || '3000'),
   mongoUri: process.env.MONGO_URI || 'mongodb://localhost:27017/apiaberta-gateway',
-  jwtSecret: process.env.JWT_SECRET || 'change-me-in-production',
+  jwtSecret: resolveJwtSecret(),
   version: pkg.version,
 
   // Rate limits per tier (requests per minute)
