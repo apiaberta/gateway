@@ -40,9 +40,19 @@ export const PUBLIC_ROUTES = [
   '/v1/sns',
 ]
 
+/**
+ * True when the request path is a public route or sits below one.
+ * Matches on whole path segments: '/v1/fuel' and '/v1/fuel/prices?x=1' are
+ * public, '/v1/fuelanything' is not. The query string is ignored.
+ */
+export function isPublicRoute(url) {
+  const path = url.split('?')[0]
+  return PUBLIC_ROUTES.some(r => path === r || path.startsWith(`${r}/`))
+}
+
 export async function authenticate(req, reply) {
   // Skip auth for public routes
-  if (PUBLIC_ROUTES.some(r => req.url.startsWith(r))) return
+  if (isPublicRoute(req.url)) return
 
   // Try Bearer JWT first (used by the dev portal frontend)
   const authHeader = req.headers['authorization']
