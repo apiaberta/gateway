@@ -6,7 +6,7 @@ Central API gateway for the API Aberta platform. Handles authentication, rate li
 
 - JWT authentication
 - API key management (free/pro/admin tiers)
-- Rate limiting per tier
+- Rate limiting per real client IP (anonymous) or API key
 - Health checks & status endpoint
 - 90-day uptime history (status page)
 - Service discovery & routing
@@ -17,6 +17,8 @@ Central API gateway for the API Aberta platform. Handles authentication, rate li
 
 - `POST /v1/auth/register` — Create account
 - `POST /v1/auth/login` — Login
+- `POST /v1/auth/forgot-password` — Request password reset email
+- `POST /v1/auth/reset-password` — Reset password with email token
 - `POST /v1/auth/refresh` — Refresh token
 - `DELETE /v1/auth/account` — Delete account
 - `GET /v1/status` — Live system status
@@ -31,6 +33,19 @@ Central API gateway for the API Aberta platform. Handles authentication, rate li
 - `POST /v1/auth/api-key/refresh` — Rotate API key
 - `DELETE /v1/auth/api-key` — Delete API key
 - All `/v1/*` service routes (fuel, ipma, base, ev, ine, anpc, bdp, geo, nif, prr, dre, nasafirms, carris, gtfs, parlamento, sns)
+
+## Rate limiting
+
+The global limiter (`@fastify/rate-limit`) is 30 requests/minute for anonymous clients and 300/minute when `X-API-Key` is present.
+
+Anonymous keys use `CF-Connecting-IP` (Cloudflare overwrites this header) and fall back to Fastify `req.ip`. `trustProxy` is limited to loopback (`127.0.0.1` / `::1`) so a client-supplied `X-Forwarded-For` is not trusted on a direct connection.
+
+These credential routes are exempt from the global limiter (`allowList` in `@fastify/rate-limit` 10.x — `skip` is not a valid option). Login and register keep their own anti-spam / brute-force checks in `src/routes/auth.js`:
+
+- `POST /v1/auth/login`
+- `POST /v1/auth/register`
+- `POST /v1/auth/forgot-password`
+- `POST /v1/auth/reset-password`
 
 ## Setup
 
