@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken'
 import { Developer, UsageLog, PasswordReset, FailedLogin, RegistrationAttempt } from '../db.js'
 import { config } from '../config.js'
 import { sendPasswordResetEmail } from '../services/email.service.js'
+import { getClientIp } from '../client-ip.js'
 
 const SALT_ROUNDS = 10
 
@@ -36,7 +37,7 @@ export async function authRoutes(app) {
     const { name, email, password } = req.body
 
     // ── Anti-spam: block if IP registered in the last 5 minutes ──
-    const clientIp = (req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim()
+    const clientIp = getClientIp(req)
     const regWindow = 5 * 60 * 1000 // 5 minutes
     const regCutoff = new Date(Date.now() - regWindow)
 
@@ -100,7 +101,7 @@ export async function authRoutes(app) {
     }
 
     // ── Brute-force protection: block IP if 5+ failed attempts in 15 min ──
-    const clientIp = (req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim()
+    const clientIp = getClientIp(req)
     const windowMs = 15 * 60 * 1000 // 15 minutes
     const cutoff = new Date(Date.now() - windowMs)
 

@@ -17,8 +17,13 @@ import { sanitizePlugin } from './plugins/sanitize.js'
 import { processPendingDeliveries, pollForEvents } from './plugins/webhook-worker.js'
 import { startStatusCollector } from './plugins/status-collector.js'
 import { config } from './config.js'
+import { TRUST_PROXY } from './client-ip.js'
+import { rateLimitConfig } from './rate-limit.js'
 
 const app = Fastify({
+  // Only trust the local reverse proxy (cloudflared / nginx on loopback).
+  // Blind trustProxy: true would honour a client-forged X-Forwarded-For.
+  trustProxy: TRUST_PROXY,
   logger: {
     transport: process.env.NODE_ENV !== 'production'
       ? { target: 'pino-pretty' }
@@ -34,20 +39,10 @@ await app.register(helmet, {
 // CORS
 await app.register(cors, { origin: true })
 
-// Rate limiting — 30 req/min for unauthenticated IPs, 300 for API key holders
-// Auth endpoints are excluded to prevent login lockout during auth loops
-await app.register(rateLimit, {
-  global: true,
-  max: (req) => req.headers['x-api-key'] ? 300 : 30,
-  timeWindow: '1 minute',
-  keyGenerator: (req) => req.headers['x-api-key'] || req.ip,
-  errorResponseBuilder: () => ({
-    error: 'Too Many Requests',
-    message: 'Rate limit exceeded. Upgrade your plan at apiaberta.pt',
-    statusCode: 429
-  }),
-  skip: (req) => req.url.startsWith('/v1/auth/login') || req.url.startsWith('/v1/auth/register')
-})
+// Rate limiting — 30 req/min per real client IP, 300 for API key holders.
+// Auth credential routes are allowListed (not skip — that option does not
+// exist in @fastify/rate-limit 10.x). Login/register keep their own anti-spam.
+await app.register(rateLimit, rateLimitConfig)
 
 // MongoDB injection protection
 await app.register(sanitizePlugin)
