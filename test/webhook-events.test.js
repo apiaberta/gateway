@@ -9,6 +9,8 @@ import { dispatchEvent } from '../src/webhooks/dispatch.js'
 import {
   pollANPCIncidents,
   pollBASEContracts,
+  pollFarmaciasCatalog,
+  pollFarmaciasServico,
   pollFuelPrices,
   pollForEvents,
   pollIPMAWarnings,
@@ -306,6 +308,231 @@ test('pollForEvents with all connectors failing does not throw', async () => {
   await pollForEvents()
 })
 
+test('farmacias servico poll seeds then dispatches municipality list changes', async () => {
+  const dev = await seedDeveloper()
+  await seedWebhook(dev, { events: ['farmacias.servico.updated'] })
+
+  const fundaoA = [{
+    pharmacy_id: '123',
+    name: 'Farmácia A',
+    municipality: 'Fundão',
+    municipality_code: '0504',
+    district: 'Castelo Branco',
+    district_code: '05',
+    shift_day: '2026-11-27'
+  }]
+  mockFetch({
+    '/farmacias/servico': { data: fundaoA, meta: { page: 1, pages: 1, total: 1 } }
+  })
+  await pollFarmaciasServico()
+  assert.equal(await WebhookDelivery.countDocuments(), 0)
+
+  const fundaoB = [
+    { ...fundaoA[0], shift_day: '2026-11-28' },
+    {
+      pharmacy_id: '456',
+      name: 'Farmácia B',
+      municipality: 'Fundão',
+      municipality_code: '0504',
+      district: 'Castelo Branco',
+      district_code: '05',
+      shift_day: '2026-11-28'
+    }
+  ]
+  mockFetch({
+    '/farmacias/servico': { data: fundaoB, meta: { page: 1, pages: 1, total: 2 } }
+  })
+  await pollFarmaciasServico()
+  const deliveries = await WebhookDelivery.find().lean()
+  assert.equal(deliveries.length, 1)
+  assert.equal(deliveries[0].event, 'farmacias.servico.updated')
+  assert.equal(deliveries[0].payload.municipality_code, '0504')
+  assert.equal(deliveries[0].payload.municipality, 'Fundão')
+  assert.equal(deliveries[0].payload.district_code, '05')
+  assert.equal(deliveries[0].payload.records, 2)
+  assert.equal(deliveries[0].payload.pharmacies.length, 2)
+  assert.deepEqual(deliveries[0].payload.pharmacies.map(p => p.pharmacy_id).sort(), ['123', '456'])
+})
+
+test('farmacias servico municipality filter skips other concelhos', async () => {
+  const dev = await seedDeveloper()
+  await seedWebhook(dev, {
+    events: ['farmacias.servico.updated'],
+    filters: { 'farmacias.servico.updated': { municipality: '0504' } }
+  })
+  await EventState.create({
+    key: 'farmacias.servico.snapshot',
+    value: { '0504': 'old-fundao', '1106': 'old-lisboa' }
+  })
+  mockFetch({
+    '/farmacias/servico': {
+      data: [
+        {
+          pharmacy_id: '1',
+          name: 'A',
+          municipality_code: '0504',
+          municipality: 'Fundão',
+          district: 'Castelo Branco',
+          district_code: '05'
+        },
+        {
+          pharmacy_id: '2',
+          name: 'B',
+          municipality_code: '1106',
+          municipality: 'Lisboa',
+          district: 'Lisboa',
+          district_code: '11'
+        }
+      ],
+      meta: { pages: 1 }
+    }
+  })
+  await pollFarmaciasServico()
+  const deliveries = await WebhookDelivery.find().lean()
+  assert.equal(deliveries.length, 1)
+  assert.equal(deliveries[0].payload.municipality_code, '0504')
+})
+
+test('farmacias servico district filter matches concelhos of that district', async () => {
+  const dev = await seedDeveloper()
+  await seedWebhook(dev, {
+    events: ['farmacias.servico.updated'],
+    filters: { 'farmacias.servico.updated': { district: '05' } }
+  })
+  await EventState.create({
+    key: 'farmacias.servico.snapshot',
+    value: { '0504': 'old-fundao', '1106': 'old-lisboa' }
+  })
+  mockFetch({
+    '/farmacias/servico': {
+      data: [
+        {
+          pharmacy_id: '1',
+          name: 'A',
+          municipality_code: '0504',
+          municipality: 'Fundão',
+          district: 'Castelo Branco',
+          district_code: '05'
+        },
+        {
+          pharmacy_id: '2',
+          name: 'B',
+          municipality_code: '1106',
+          municipality: 'Lisboa',
+          district: 'Lisboa',
+          district_code: '11'
+        }
+      ],
+      meta: { pages: 1 }
+    }
+  })
+  await pollFarmaciasServico()
+  const deliveries = await WebhookDelivery.find().lean()
+  assert.equal(deliveries.length, 1)
+  assert.equal(deliveries[0].payload.municipality_code, '0504')
+  assert.equal(deliveries[0].payload.district_code, '05')
+})
+
+test('farmacias servico poll dispatches empty list when a concelho drops off', async () => {
+  const dev = await seedDeveloper()
+  await seedWebhook(dev, { events: ['farmacias.servico.updated'] })
+  await EventState.create({
+    key: 'farmacias.servico.snapshot',
+    value: { '0504': '123' }
+  })
+  mockFetch({
+    '/farmacias/servico': { data: [], meta: { page: 1, pages: 1, total: 0 } }
+  })
+  await pollFarmaciasServico()
+  const deliveries = await WebhookDelivery.find().lean()
+  assert.equal(deliveries.length, 1)
+  assert.equal(deliveries[0].payload.municipality_code, '0504')
+  assert.equal(deliveries[0].payload.records, 0)
+  assert.deepEqual(deliveries[0].payload.pharmacies, [])
+})
+
+test('farmacias servico poll pages past the first 100 rows', async () => {
+  const dev = await seedDeveloper()
+  await seedWebhook(dev, { events: ['farmacias.servico.updated'] })
+  await EventState.create({
+    key: 'farmacias.servico.snapshot',
+    value: { '1106': 'stale-lisboa' }
+  })
+
+  const page1 = Array.from({ length: 100 }, (_, i) => ({
+    pharmacy_id: `p${i}`,
+    name: `F${i}`,
+    municipality_code: '1106',
+    municipality: 'Lisboa',
+    district: 'Lisboa',
+    district_code: '11'
+  }))
+  const page2 = [{
+    pharmacy_id: 'new-fundao',
+    name: 'Fundão Extra',
+    municipality_code: '0504',
+    municipality: 'Fundão',
+    district: 'Castelo Branco',
+    district_code: '05'
+  }]
+
+  mockFetch({
+    '/farmacias/servico': href => {
+      const url = new URL(href, 'http://gateway.test')
+      const page = Number(url.searchParams.get('page') || 1)
+      if (page === 1) return { data: page1, meta: { page: 1, pages: 2, total: 101 } }
+      return { data: page2, meta: { page: 2, pages: 2, total: 101 } }
+    }
+  })
+  await pollFarmaciasServico()
+  const deliveries = await WebhookDelivery.find().lean()
+  const codes = deliveries.map(d => d.payload.municipality_code).sort()
+  assert.deepEqual(codes, ['0504', '1106'])
+  const fundao = deliveries.find(d => d.payload.municipality_code === '0504')
+  assert.equal(fundao.payload.records, 1)
+  assert.equal(fundao.payload.pharmacies[0].pharmacy_id, 'new-fundao')
+})
+
+test('farmacias catalog poll dispatches new Infarmed pharmacies', async () => {
+  const dev = await seedDeveloper()
+  await seedWebhook(dev, {
+    events: ['farmacias.farmacia.new'],
+    filters: { 'farmacias.farmacia.new': { municipality: '0504' } }
+  })
+  await EventState.create({ key: 'farmacias.farmacia.ids', value: ['old'] })
+  mockFetch({
+    '/farmacias?': {
+      data: [
+        { license_number: 'old', name: 'Velha', municipality_code: '0504', municipality: 'Fundão' },
+        {
+          license_number: '9999',
+          name: 'Nova do Fundão',
+          municipality_code: '0504',
+          municipality: 'Fundão',
+          district: 'Castelo Branco',
+          district_code: '05'
+        },
+        {
+          license_number: '8888',
+          name: 'Nova de Lisboa',
+          municipality_code: '1106',
+          municipality: 'Lisboa',
+          district: 'Lisboa',
+          district_code: '11'
+        }
+      ],
+      meta: { pages: 1 }
+    }
+  })
+  await pollFarmaciasCatalog()
+  const deliveries = await WebhookDelivery.find().lean()
+  assert.equal(deliveries.length, 1)
+  assert.equal(deliveries[0].event, 'farmacias.farmacia.new')
+  assert.equal(deliveries[0].payload.license_number, '9999')
+  assert.equal(deliveries[0].payload.municipality_code, '0504')
+  assert.equal(deliveries[0].payload.name, 'Nova do Fundão')
+})
+
 test('POST /v1/webhooks stores filters; GET lists them; PATCH updates', async () => {
   const dev = await seedDeveloper()
   const app = await buildApp()
@@ -386,6 +613,8 @@ test('POST /v1/webhooks stores filters; GET lists them; PATCH updates', async ()
   assert.ok(catalog.events[0].filters)
   assert.ok(catalog.lookup_only.some(s => s.service === '/v1/nif'))
   assert.ok(SUPPORTED_EVENTS.includes('parlamento.iniciativa.new'))
+  assert.ok(SUPPORTED_EVENTS.includes('farmacias.servico.updated'))
+  assert.ok(SUPPORTED_EVENTS.includes('farmacias.farmacia.new'))
   assert.ok(catalog.refs?.municipalities?.length >= 308)
   assert.ok(catalog.events.find(e => e.name === 'base.contract.new').filters.find(f => f.key === 'municipality').options_source)
 

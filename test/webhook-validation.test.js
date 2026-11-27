@@ -90,6 +90,18 @@ test('enum and number filter values are coerced and validated', () => {
   assert.equal(ok.filters['base.contract.new'].nif_entidade, '505456010')
   assert.equal(ok.filters['dre.diploma.new'].series, 'II')
 
+  const farmacias = validateWebhookBody({
+    url: 'https://example.com/h',
+    events: ['farmacias.servico.updated', 'farmacias.farmacia.new'],
+    filters: {
+      'farmacias.servico.updated': { municipality: 'Fundão', district: 'Castelo Branco' },
+      'farmacias.farmacia.new': { municipality: '0504' }
+    }
+  })
+  assert.equal(farmacias.filters['farmacias.servico.updated'].municipality, '0504')
+  assert.equal(farmacias.filters['farmacias.servico.updated'].district, '05')
+  assert.equal(farmacias.filters['farmacias.farmacia.new'].municipality, '0504')
+
   assert.throws(
     () => validateWebhookBody({
       url: 'https://example.com/h',
@@ -197,6 +209,8 @@ test('GET /events catalogue has service, PT labels and typed filters', () => {
     'bdp.rates.updated',
     'ine.indicator.updated',
     'sns.dataset.updated',
+    'farmacias.servico.updated',
+    'farmacias.farmacia.new',
     'carris.alert.new',
     'gtfs.changes.new',
     'pt2030.summary.updated',
@@ -221,6 +235,15 @@ test('GET /events catalogue has service, PT labels and typed filters', () => {
 
   const sns = events.find(e => e.name === 'sns.dataset.updated')
   assert.equal(sns.filters.some(f => f.key === 'regiao'), false)
+
+  const farmacias = events.find(e => e.name === 'farmacias.servico.updated')
+  assert.deepEqual(farmacias.filters.map(f => f.key).sort(), ['district', 'municipality'])
+  assert.equal(farmacias.filters.find(f => f.key === 'municipality').options_source, '/v1/geo/municipalities')
+  assert.equal(farmacias.filters.find(f => f.key === 'district').options_source, '/v1/geo/districts')
+  assert.equal(farmacias.geo_precision, 'municipality')
+  const farmaciaNew = events.find(e => e.name === 'farmacias.farmacia.new')
+  assert.ok(farmaciaNew.filters.some(f => f.key === 'municipality'))
+  assert.equal(farmaciaNew.filters.find(f => f.key === 'municipality').options_source, '/v1/geo/municipalities')
 
   const dre = events.find(e => e.name === 'dre.diploma.new')
   assert.equal(dre.filters.find(f => f.key === 'q').free_text, true)

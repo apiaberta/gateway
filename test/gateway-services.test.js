@@ -52,6 +52,15 @@ const NEW_SERVICES = [
     publicRoute: '/v1/sns',
     ttl: 3600,
     samplePath: '/sns/datasets'
+  },
+  {
+    prefix: '/farmacias',
+    name: 'Farmácias (Infarmed / Linha 1400)',
+    env: 'FARMACIAS_SERVICE_URL',
+    defaultTarget: 'http://localhost:3007',
+    publicRoute: '/v1/farmacias',
+    ttl: 300,
+    samplePath: '/farmacias/servico'
   }
 ]
 
@@ -104,7 +113,7 @@ test('existing service prefixes are left in place', () => {
   }
 })
 
-test('registers four new services with default localhost ports', () => {
+test('registers additional services with default localhost ports', () => {
   for (const spec of NEW_SERVICES) {
     const svc = serviceByPrefix(spec.prefix)
     assert.ok(svc, `missing service ${spec.prefix}`)
@@ -113,7 +122,7 @@ test('registers four new services with default localhost ports', () => {
   }
 })
 
-test('gateway has 18 services after adding the four connectors (14 + 4)', () => {
+test('gateway has 19 services after adding the five connectors (14 + 5)', () => {
   assert.equal(config.services.length, EXISTING_PREFIXES.length + NEW_SERVICES.length)
 })
 
@@ -204,7 +213,8 @@ test('every registered service has an explicit cache TTL', () => {
     '/carris': 20,
     '/gtfs': 300,
     '/parlamento': 1800,
-    '/sns': 3600
+    '/sns': 3600,
+    '/farmacias': 300
   }
   for (const svc of config.services) {
     assert.equal(CACHE_TTLS[svc.prefix], expected[svc.prefix], svc.prefix)
@@ -250,6 +260,10 @@ test('proxy strips /v1 and keeps the connector prefix and query string', () => {
   assert.equal(
     buildConnectorUrl('http://localhost:3019', '/v1/parlamento'),
     'http://localhost:3019/parlamento'
+  )
+  assert.equal(
+    buildConnectorUrl('http://localhost:3007', '/v1/farmacias/servico?municipality=0504'),
+    'http://localhost:3007/farmacias/servico?municipality=0504'
   )
   // same rewrite as existing connectors (fuel, etc.)
   assert.equal(
@@ -379,6 +393,7 @@ test('.env.example documents the new and previously missing service URLs', () =>
     'GTFS_SERVICE_URL=http://localhost:3018',
     'PARLAMENTO_SERVICE_URL=http://localhost:3019',
     'SNS_SERVICE_URL=http://localhost:3020',
+    'FARMACIAS_SERVICE_URL=http://localhost:3007',
     'BDP_SERVICE_URL=http://localhost:3008'
   ]
   for (const line of expected) {

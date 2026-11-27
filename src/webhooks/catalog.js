@@ -657,6 +657,34 @@ export const WEBHOOK_EVENTS = [
     ]
   },
   {
+    name: 'farmacias.servico.updated',
+    service: '/v1/farmacias',
+    kind: 'item',
+    geo_precision: 'municipality',
+    description: 'Fired when the on-duty pharmacy list of a municipality changes',
+    label_pt: 'Farmácias de serviço atualizadas',
+    description_pt: 'Disparado quando muda a lista de farmácias de serviço de um concelho (turno 9h–9h, Linha 1400). O payload inclui a lista nova.',
+    payload_fields: ['municipality', 'municipality_code', 'district', 'district_code', 'shift_day', 'shift_start', 'shift_end', 'records', 'pharmacies'],
+    filters: [
+      municipalityFilter(['municipality_code', 'municipality']),
+      districtFilter(['district_code', 'district'])
+    ]
+  },
+  {
+    name: 'farmacias.farmacia.new',
+    service: '/v1/farmacias',
+    kind: 'item',
+    geo_precision: 'municipality',
+    description: 'Fired when a new pharmacy appears in the Infarmed catalogue',
+    label_pt: 'Nova farmácia no catálogo Infarmed',
+    description_pt: 'Disparado quando entra uma farmácia nova no catálogo Infarmed (alvará).',
+    payload_fields: ['id', 'license_number', 'name', 'street', 'postal_code', 'municipality', 'municipality_code', 'district', 'district_code', 'latitude', 'longitude'],
+    filters: [
+      municipalityFilter(['municipality_code', 'municipality']),
+      districtFilter(['district_code', 'district'])
+    ]
+  },
+  {
     name: 'prr.catalogue.updated',
     service: '/v1/prr',
     kind: 'aggregate',

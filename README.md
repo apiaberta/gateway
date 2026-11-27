@@ -34,7 +34,7 @@ Central API gateway for the API Aberta platform. Handles authentication, rate li
 - `POST /v1/auth/api-key` — Generate API key
 - `POST /v1/auth/api-key/refresh` — Rotate API key
 - `DELETE /v1/auth/api-key` — Delete API key
-- All `/v1/*` service routes (fuel, ipma, base, ev, ine, anpc, bdp, geo, nif, prr, dre, nasafirms, carris, gtfs, parlamento, sns)
+- All `/v1/*` service routes (fuel, ipma, base, ev, ine, anpc, farmacias, bdp, geo, nif, prr, dre, nasafirms, carris, gtfs, parlamento, sns)
 - Webhooks (JWT or `X-API-Key`): `POST/GET /v1/webhooks`, `GET/PATCH/DELETE /v1/webhooks/:id`, `POST /v1/webhooks/:id/test`, `GET /v1/webhooks/:id/deliveries`
 
 ## Rate limiting
@@ -72,6 +72,7 @@ The gateway routes to these microservices:
 - **/v1/ev** → EV charging prices
 - **/v1/ine** → Statistics (INE/Eurostat)
 - **/v1/anpc** → Civil protection alerts
+- **/v1/farmacias** → Farmácias (Infarmed / Linha 1400)
 - **/v1/bdp** → Banco de Portugal data
 - **/v1/geo** → Geographic data (geoapi.pt)
 - **/v1/nif** → NIF validator
