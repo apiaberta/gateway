@@ -195,6 +195,8 @@ Reject the delivery if neither version matches. Optionally also reject if `|now 
 | `parlamento.iniciativa.new` | `/v1/parlamento` | New initiative | tipo, gp, estado (enums) |
 | `parlamento.votacao.new` | `/v1/parlamento` | New vote | resultado, gp |
 | `sns.dataset.updated` | `/v1/sns` | Dataset `last_changed` / period changes | dataset (`regiao` removed — it never matched) |
+| `farmacias.servico.updated` | `/v1/farmacias` | On-duty pharmacy list of a municipality changes. Payload includes the new list. | municipality (INE), district |
+| `farmacias.farmacia.new` | `/v1/farmacias` | New pharmacy in the Infarmed catalogue | municipality (INE), district |
 | `prr.catalogue.updated` | `/v1/prr` | PRR catalogue hash changes | component |
 | `pt2030.summary.updated` | `/v1/pt2030` | PT2030 summary payload changes | — |
 

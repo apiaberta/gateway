@@ -999,6 +999,154 @@ export async function pollSNSDatasets(log) {
   await setState('sns.datasets.snapshot', snapshot)
 }
 
+// ─── Farmácias ────────────────────────────────────────────────────────────────
+
+export function farmaciaId(p) {
+  return p.license_number || p.id || p.pharmacy_id || null
+}
+
+export function farmaciaServicoId(p) {
+  return farmaciaId(p) || [p.name, p.street, p.town].filter(Boolean).join('|') || null
+}
+
+export function municipalityCodeOf(row) {
+  if (row == null) return null
+  const raw = row.municipality_code
+  if (raw != null && /^\d{1,4}$/.test(String(raw))) return String(raw).padStart(4, '0')
+  const resolved = resolveMunicipality(row.municipality_code || row.municipality, { district: row.district })
+  return resolved.code || null
+}
+
+export function servicoListFingerprint(pharmacies) {
+  return pharmacies
+    .map(farmaciaServicoId)
+    .filter(Boolean)
+    .sort()
+    .join('\n')
+}
+
+function formatFarmacia(p) {
+  const code = municipalityCodeOf(p)
+  const muni = code ? getMunicipality(code) : null
+  return {
+    id: String(farmaciaId(p) || p.name),
+    license_number: p.license_number || null,
+    name: p.name,
+    operator: p.operator ?? null,
+    street: p.street ?? null,
+    postal_code: p.postal_code ?? null,
+    locality: p.locality ?? p.town ?? null,
+    parish: p.parish ?? null,
+    municipality: p.municipality || muni?.name || null,
+    municipality_code: code,
+    district: p.district || (muni ? districtName(muni.district_code) : null),
+    district_code: p.district_code || muni?.district_code || null,
+    latitude: p.latitude ?? null,
+    longitude: p.longitude ?? null,
+    license_status: p.license_status ?? null
+  }
+}
+
+function formatServicoPharmacy(p) {
+  const code = municipalityCodeOf(p)
+  return {
+    pharmacy_id: p.pharmacy_id ?? p.license_number ?? null,
+    name: p.name,
+    street: p.street || null,
+    town: p.town ?? p.locality ?? null,
+    municipality: p.municipality ?? null,
+    municipality_code: code,
+    district: p.district ?? null,
+    district_code: p.district_code ?? null,
+    latitude: p.latitude ?? null,
+    longitude: p.longitude ?? null,
+    shift: p.shift ?? null,
+    shift_start: p.shift_start ?? null,
+    shift_end: p.shift_end ?? null,
+    shift_day: p.shift_day ?? null
+  }
+}
+
+export function formatServicoMunicipality(code, pharmacies) {
+  const sample = pharmacies[0]
+  const muni = getMunicipality(code)
+  const districtCode = sample?.district_code || muni?.district_code || null
+  return {
+    municipality: sample?.municipality || muni?.name || municipalityName(code),
+    municipality_code: code,
+    district: sample?.district || districtName(districtCode),
+    district_code: districtCode,
+    shift_day: sample?.shift_day || null,
+    shift_start: sample?.shift_start || null,
+    shift_end: sample?.shift_end || null,
+    records: pharmacies.length,
+    pharmacies
+  }
+}
+
+async function fetchFarmaciasPaged(path) {
+  const first = await connectorGet('/farmacias', `${path}?limit=100&page=1`)
+  if (!first) return null
+  const items = [...listItems(first)]
+  const pages = Math.min(pageCount(first), 40)
+  for (let page = 2; page <= pages; page++) {
+    const json = await connectorGet('/farmacias', `${path}?limit=100&page=${page}`)
+    items.push(...listItems(json))
+  }
+  return items
+}
+
+export async function pollFarmaciasServico(log) {
+  const items = await fetchFarmaciasPaged('/farmacias/servico')
+  if (items == null) return
+
+  const groups = new Map()
+  for (const raw of items) {
+    const pharmacy = formatServicoPharmacy(raw)
+    const code = pharmacy.municipality_code
+    if (!code) continue
+    if (!groups.has(code)) groups.set(code, [])
+    groups.get(code).push(pharmacy)
+  }
+
+  const snapshot = Object.fromEntries(
+    [...groups.entries()].map(([code, pharmacies]) => [code, servicoListFingerprint(pharmacies)])
+  )
+
+  const prev = await getState('farmacias.servico.snapshot')
+  if (prev == null) {
+    await setState('farmacias.servico.snapshot', snapshot)
+    return
+  }
+
+  const prevMap = prev && typeof prev === 'object' && !Array.isArray(prev) ? prev : {}
+  const codes = new Set([...Object.keys(prevMap), ...groups.keys()])
+
+  for (const code of codes) {
+    const pharmacies = groups.get(code) || []
+    const token = snapshot[code] || ''
+    if (prevMap[code] === token) continue
+    const payload = formatServicoMunicipality(code, pharmacies)
+    await dispatchEvent('farmacias.servico.updated', payload)
+    log?.info({ municipality: code, records: pharmacies.length }, 'Farmácias de serviço update dispatched')
+  }
+
+  await setState('farmacias.servico.snapshot', snapshot)
+}
+
+export async function pollFarmaciasCatalog(log) {
+  const items = await fetchFarmaciasPaged('/farmacias')
+  if (items == null) return
+  await dispatchNewItems('farmacias.farmacia.new', items, {
+    stateKey: 'farmacias.farmacia.ids',
+    cap: 4000,
+    idOf: farmaciaId,
+    toPayload: formatFarmacia,
+    log,
+    msg: 'New farmácia dispatched'
+  })
+}
+
 // ─── PRR / PT2030 ─────────────────────────────────────────────────────────────
 
 export async function pollPRRCatalogue(log) {
@@ -1070,6 +1218,8 @@ const POLLERS = [
   pollParlamentoIniciativas,
   pollParlamentoVotacoes,
   pollSNSDatasets,
+  pollFarmaciasServico,
+  pollFarmaciasCatalog,
   pollPRRCatalogue,
   pollPT2030Summary
 ]

@@ -51,6 +51,11 @@ export const config = {
       target: process.env.ANPC_SERVICE_URL || 'http://localhost:3006'
     },
     {
+      name:   'Farmácias (Infarmed / Linha 1400)',
+      prefix: '/farmacias',
+      target: process.env.FARMACIAS_SERVICE_URL || 'http://localhost:3007'
+    },
+    {
       name:   'Banco de Portugal (BdP)',
       prefix: '/bdp',
       target: process.env.BDP_SERVICE_URL || 'http://localhost:3008'

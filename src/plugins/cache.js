@@ -8,6 +8,7 @@
  *   /ev     → 600   (EV tariffs update infrequently)
  *   /ine    → 3600  (statistics are mostly static)
  *   /anpc        → 60    (civil protection incidents are real-time)
+ *   /farmacias   → 300   (duty roster changes at 09:00 and 21:00)
  *   /bdp         → 3600  (BdP rates sync once a day)
  *   /contracts   → 1800  (same data as /base)
  *   /geo         → 3600  (administrative geography)
@@ -29,6 +30,7 @@ export const CACHE_TTLS = {
   '/ev':   600,
   '/ine':  3600,
   '/anpc': 60,
+  '/farmacias': 300,
   '/bdp': 3600,
   '/contracts': 1800,
   '/geo': 3600,

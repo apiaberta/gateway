@@ -24,6 +24,7 @@ export const PUBLIC_ROUTES = [
   '/v1/ev',
   '/v1/ine',
   '/v1/anpc',
+  '/v1/farmacias',
   '/v1/bdp',
   '/v1/webhooks/events',
   '/v1/contracts',

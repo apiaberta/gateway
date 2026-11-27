@@ -67,6 +67,7 @@ test('service ids strip leading slashes and /v1', () => {
   assert.equal(serviceIdFromPrefix('/fuel'), 'fuel')
   assert.equal(serviceIdFromPrefix('/v1/fuel'), 'fuel')
   assert.equal(serviceIdFromConfig({ prefix: '/parlamento' }), 'parlamento')
+  assert.equal(serviceIdFromConfig({ prefix: '/farmacias' }), 'farmacias')
 })
 
 test('uptime = (up + 0.5 * degraded) / checks', () => {
