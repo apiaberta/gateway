@@ -3,15 +3,24 @@ import { nanoid } from 'nanoid'
 import jwt from 'jsonwebtoken'
 import { Developer, Webhook, WebhookDelivery } from '../db.js'
 import { config } from '../config.js'
+import {
+  LOOKUP_ONLY_SERVICES,
+  SUPPORTED_EVENTS,
+  publicEventCatalog,
+  serializeWebhook
+} from '../webhooks/catalog.js'
+import { WebhookValidationError, validateWebhookBody } from '../webhooks/validate.js'
 
-// Supported events
-export const SUPPORTED_EVENTS = [
-  'ipma.warning.new',
-  'fuel.prices.updated',
-  'anpc.incident.new',
-  'base.contract.new',
-  'ev.prices.updated'
-]
+export { SUPPORTED_EVENTS }
+
+const FILTERS_SCHEMA = {
+  type: 'object',
+  additionalProperties: {
+    type: 'object',
+    additionalProperties: true
+  },
+  description: 'Per-event filters, e.g. { "base.contract.new": { "local": "Fundão" } }. An event with no filters receives everything.'
+}
 
 // Resolve developer from JWT Bearer or API key
 async function resolveDeveloper(req, reply) {
@@ -33,6 +42,17 @@ async function resolveDeveloper(req, reply) {
     return dev
   }
   return reply.code(401).send({ error: 'Unauthorized', message: 'Authentication required (Bearer token or X-API-Key)' })
+}
+
+function sendValidationError(reply, err) {
+  if (err instanceof WebhookValidationError) {
+    return reply.code(400).send({
+      error: 'Bad Request',
+      message: err.message,
+      details: err.details.length ? err.details : undefined
+    })
+  }
+  throw err
 }
 
 // Sign a webhook payload with HMAC-SHA256
@@ -93,7 +113,28 @@ async function deliverWebhook({ webhook, event, payload, isTest = false }) {
   return { deliveryId: delivery._id, status, responseCode, error: errorMsg }
 }
 
+async function ensureActiveLimit(apiKey, extraActive) {
+  if (!extraActive) return
+  const count = await Webhook.countDocuments({ apiKey, active: true })
+  if (count >= 10) {
+    const err = new WebhookValidationError('Maximum 10 active webhooks per account')
+    err.statusCode = 429
+    throw err
+  }
+}
+
 export async function webhookRoutes(app) {
+
+  // GET /v1/webhooks/events — list supported events (static path before /:id)
+  app.get('/events', {
+    schema: {
+      description: 'List supported webhook events, filters and lookup-only services',
+      tags: ['Webhooks']
+    }
+  }, async () => ({
+    events: publicEventCatalog(),
+    lookup_only: LOOKUP_ONLY_SERVICES
+  }))
 
   // POST /v1/webhooks — create subscription
   app.post('/', {
@@ -104,13 +145,18 @@ export async function webhookRoutes(app) {
         type: 'object',
         required: ['url', 'events'],
         properties: {
-          url:    { type: 'string', format: 'uri', description: 'HTTPS URL to receive webhook POSTs' },
+          url: {
+            type: 'string',
+            format: 'uri',
+            description: 'HTTPS URL to receive webhook POSTs'
+          },
           events: {
             type: 'array',
             minItems: 1,
             items: { type: 'string', enum: SUPPORTED_EVENTS },
-            description: `Events to subscribe to: ${SUPPORTED_EVENTS.join(', ')}`
-          }
+            description: 'Events to subscribe to'
+          },
+          filters: FILTERS_SCHEMA
         }
       }
     }
@@ -118,38 +164,84 @@ export async function webhookRoutes(app) {
     const dev = await resolveDeveloper(req, reply)
     if (reply.sent) return
 
-    const { url, events } = req.body
-
-    // Validate URL is HTTPS
-    if (!url.startsWith('https://')) {
-      return reply.code(400).send({ error: 'Bad Request', message: 'Webhook URL must use HTTPS' })
-    }
-
-    // Limit per developer: max 10 active webhooks
-    const count = await Webhook.countDocuments({ apiKey: dev.apiKey, active: true })
-    if (count >= 10) {
-      return reply.code(429).send({ error: 'Limit Exceeded', message: 'Maximum 10 active webhooks per account' })
+    let parsed
+    try {
+      parsed = validateWebhookBody(req.body, { partial: false })
+      await ensureActiveLimit(dev.apiKey, true)
+    } catch (err) {
+      if (err instanceof WebhookValidationError && err.statusCode === 429) {
+        return reply.code(429).send({ error: 'Limit Exceeded', message: err.message })
+      }
+      return sendValidationError(reply, err)
     }
 
     const secret = `whsec_${nanoid(32)}`
     const webhook = await Webhook.create({
       developerId: dev._id,
       apiKey: dev.apiKey,
-      url,
-      events,
-      secret
+      url: parsed.url,
+      events: parsed.events,
+      filters: parsed.filters,
+      secret,
+      updatedAt: new Date()
     })
 
     reply.code(201)
     return {
-      id:        webhook._id,
-      url:       webhook.url,
-      events:    webhook.events,
-      secret,    // Only returned once at creation
-      active:    webhook.active,
-      createdAt: webhook.createdAt,
+      ...serializeWebhook(webhook),
+      secret,
       note: 'Store the secret securely — it will not be shown again. Use it to verify webhook signatures.'
     }
+  })
+
+  // PATCH /v1/webhooks/:id — update url, events, filters, active
+  app.patch('/:id', {
+    schema: {
+      description: 'Update a webhook subscription (url, events, filters, active)',
+      tags: ['Webhooks'],
+      params: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+      body: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', format: 'uri' },
+          events: {
+            type: 'array',
+            minItems: 1,
+            items: { type: 'string', enum: SUPPORTED_EVENTS }
+          },
+          filters: FILTERS_SCHEMA,
+          active: { type: 'boolean' }
+        }
+      }
+    }
+  }, async (req, reply) => {
+    const dev = await resolveDeveloper(req, reply)
+    if (reply.sent) return
+
+    const webhook = await Webhook.findOne({ _id: req.params.id, apiKey: dev.apiKey })
+    if (!webhook) return reply.code(404).send({ error: 'Not Found', message: 'Webhook not found' })
+
+    let parsed
+    try {
+      parsed = validateWebhookBody(req.body, { partial: true, current: webhook.toObject() })
+      if (parsed.active && !webhook.active) {
+        await ensureActiveLimit(dev.apiKey, true)
+      }
+    } catch (err) {
+      if (err instanceof WebhookValidationError && err.statusCode === 429) {
+        return reply.code(429).send({ error: 'Limit Exceeded', message: err.message })
+      }
+      return sendValidationError(reply, err)
+    }
+
+    webhook.url = parsed.url
+    webhook.events = parsed.events
+    webhook.filters = parsed.filters
+    webhook.active = parsed.active
+    webhook.updatedAt = new Date()
+    await webhook.save()
+
+    return serializeWebhook(webhook)
   })
 
   // POST /v1/webhooks/:id/test — send a test delivery
@@ -220,13 +312,7 @@ export async function webhookRoutes(app) {
     return {
       count: webhooks.length,
       supported_events: SUPPORTED_EVENTS,
-      data: webhooks.map(w => ({
-        id:        w._id,
-        url:       w.url,
-        events:    w.events,
-        active:    w.active,
-        createdAt: w.createdAt
-      }))
+      data: webhooks.map(serializeWebhook)
     }
   })
 
@@ -244,13 +330,7 @@ export async function webhookRoutes(app) {
     const webhook = await Webhook.findOne({ _id: req.params.id, apiKey: dev.apiKey }).lean()
     if (!webhook) return reply.code(404).send({ error: 'Not Found', message: 'Webhook not found' })
 
-    return {
-      id:        webhook._id,
-      url:       webhook.url,
-      events:    webhook.events,
-      active:    webhook.active,
-      createdAt: webhook.createdAt
-    }
+    return serializeWebhook(webhook)
   })
 
   // DELETE /v1/webhooks/:id — deactivate webhook
@@ -266,7 +346,7 @@ export async function webhookRoutes(app) {
 
     const webhook = await Webhook.findOneAndUpdate(
       { _id: req.params.id, apiKey: dev.apiKey },
-      { active: false },
+      { active: false, updatedAt: new Date() },
       { new: true }
     )
     if (!webhook) return reply.code(404).send({ error: 'Not Found', message: 'Webhook not found' })
@@ -305,40 +385,4 @@ export async function webhookRoutes(app) {
       }))
     }
   })
-
-  // GET /v1/webhooks/events — list supported events (must be last GET to avoid /:id conflict)
-  app.get('/events', {
-    schema: {
-      description: 'List supported webhook events',
-      tags: ['Webhooks']
-    }
-  }, async () => ({
-    events: [
-      {
-        name: 'ipma.warning.new',
-        description: 'Fired when IPMA issues a new meteorological warning',
-        payload_fields: ['id', 'level', 'type', 'text', 'region', 'startTime', 'endTime']
-      },
-      {
-        name: 'fuel.prices.updated',
-        description: 'Fired when DGEG publishes new fuel price data',
-        payload_fields: ['date', 'diesel_avg', 'gasoline95_avg', 'lpg_avg', 'records']
-      },
-      {
-        name: 'anpc.incident.new',
-        description: 'Fired when a new civil protection incident is reported',
-        payload_fields: ['id', 'type', 'location', 'district', 'status', 'reported_at']
-      },
-      {
-        name: 'base.contract.new',
-        description: 'Fired when a new public contract is published on BASE.gov.pt',
-        payload_fields: ['id', 'description', 'contractingEntity', 'awarded', 'value', 'date', 'type']
-      },
-      {
-        name: 'ev.prices.updated',
-        description: 'Fired when OMIE electricity market prices are updated',
-        payload_fields: ['period', 'price_eur_mwh', 'price_eur_kwh', 'source']
-      }
-    ]
-  }))
 }

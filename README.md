@@ -10,6 +10,7 @@ Central API gateway for the API Aberta platform. Handles authentication, rate li
 - Health checks & status endpoint
 - 90-day uptime history (status page)
 - Service discovery & routing
+- Outbound webhooks (connector polling + per-event filters)
 
 ## Endpoints
 
@@ -24,6 +25,7 @@ Central API gateway for the API Aberta platform. Handles authentication, rate li
 - `GET /v1/status` — Live system status
 - `GET /v1/status/history?days=90` — Daily uptime (max 365 days, Europe/Lisbon)
 - `GET /v1/status/incidents?days=90` — Degraded/down incidents in the window
+- `GET /v1/webhooks/events` — Supported webhook events, filters and lookup-only services
 
 ### Protected Routes
 
@@ -33,6 +35,7 @@ Central API gateway for the API Aberta platform. Handles authentication, rate li
 - `POST /v1/auth/api-key/refresh` — Rotate API key
 - `DELETE /v1/auth/api-key` — Delete API key
 - All `/v1/*` service routes (fuel, ipma, base, ev, ine, anpc, bdp, geo, nif, prr, dre, nasafirms, carris, gtfs, parlamento, sns)
+- Webhooks (JWT or `X-API-Key`): `POST/GET /v1/webhooks`, `GET/PATCH/DELETE /v1/webhooks/:id`, `POST /v1/webhooks/:id/test`, `GET /v1/webhooks/:id/deliveries`
 
 ## Rate limiting
 
@@ -93,6 +96,16 @@ Only one process runs the collector (Mongo lock), so PM2 cluster mode does not d
 Uptime is `(up + 0.5 × degraded) / checks`. History and incident endpoints are public, CORS-enabled like `/v1/status`, and sent with `Cache-Control: public, max-age=30`.
 
 OpenAPI for these routes is published at `/docs`.
+
+## Webhooks
+
+The gateway polls connector HTTP endpoints every 5 minutes, diffs against `EventState` (seen ids / hashes) and queues HMAC-signed POSTs to subscribed URLs. Connectors do not push events into the gateway. The first observation of each state key is stored without dispatch, so a restart does not replay the current snapshot.
+
+`GET /v1/nif` and `GET /v1/geo` are lookup-only (no events). `/v1/contracts` is an alias of `/v1/base` — subscribe to `base.contract.new`.
+
+Per-event filters live on the webhook document (`filters: { [eventName]: { [key]: value } }`). Matching is case- and accent-insensitive for `equals` / `contains_ci`. Aggregated events such as `fuel.prices.updated` send national averages unless a local filter is set, in which case only matching stations are delivered (or the event is skipped).
+
+See [docs/webhooks.md](docs/webhooks.md) for the event catalogue, payload headers and filter contract.
 
 ## License
 
