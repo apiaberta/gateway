@@ -36,9 +36,11 @@ const webhookSchema = new mongoose.Schema({
   apiKey:      { type: String, required: true, index: true },
   url:         { type: String, required: true },
   events:      [{ type: String }],
+  filters:     { type: mongoose.Schema.Types.Mixed, default: {} },
   secret:      { type: String, required: true },
   active:      { type: Boolean, default: true },
-  createdAt:   { type: Date, default: Date.now }
+  createdAt:   { type: Date, default: Date.now },
+  updatedAt:   { type: Date, default: Date.now }
 })
 
 // Webhook delivery log
