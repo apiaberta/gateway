@@ -5,6 +5,7 @@ import { Developer, UsageLog, PasswordReset, FailedLogin, RegistrationAttempt } 
 import { config } from '../config.js'
 import { sendPasswordResetEmail } from '../services/email.service.js'
 import { getClientIp } from '../client-ip.js'
+import { resolveDeveloper } from '../resolve-developer.js'
 
 const SALT_ROUNDS = 10
 
@@ -144,17 +145,12 @@ export async function authRoutes(app) {
     schema: {
       description: 'Get current account info',
       tags: ['Auth'],
-      security: [{ apiKey: [] }]
+      security: [{ bearerAuth: [] }, { apiKey: [] }]
     }
   }, async (req, reply) => {
-    const apiKey = req.headers['x-api-key']
-    if (!apiKey) {
-      return reply.code(401).send({ error: 'Unauthorized', message: 'API key required' })
-    }
-
-    const dev = await Developer.findOne({ apiKey, active: true })
-    if (!dev) {
-      return reply.code(401).send({ error: 'Unauthorized', message: 'Invalid API key' })
+    const { developer: dev, error } = await resolveDeveloper(req)
+    if (error) {
+      return reply.code(401).send({ error: 'Unauthorized', message: error })
     }
 
     return {
@@ -171,19 +167,15 @@ export async function authRoutes(app) {
     schema: {
       description: 'Your API usage stats for the last 30 days',
       tags: ['Auth'],
-      security: [{ apiKey: [] }]
+      security: [{ bearerAuth: [] }, { apiKey: [] }]
     }
   }, async (req, reply) => {
-    const apiKey = req.headers['x-api-key']
-    if (!apiKey) {
-      return reply.code(401).send({ error: 'Unauthorized', message: 'API key required' })
+    const { developer: dev, error } = await resolveDeveloper(req)
+    if (error) {
+      return reply.code(401).send({ error: 'Unauthorized', message: error })
     }
 
-    const dev = await Developer.findOne({ apiKey, active: true })
-    if (!dev) {
-      return reply.code(401).send({ error: 'Unauthorized', message: 'Invalid API key' })
-    }
-
+    const apiKey = dev.apiKey
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
     
     const [total, last30d, byEndpoint] = await Promise.all([
