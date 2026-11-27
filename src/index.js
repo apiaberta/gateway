@@ -14,7 +14,7 @@ import { statsRoutes } from './routes/stats.js'
 import { webhookRoutes } from './routes/webhooks.js'
 import { authenticate } from './plugins/authenticate.js'
 import { sanitizePlugin } from './plugins/sanitize.js'
-import { processPendingDeliveries, pollForEvents } from './plugins/webhook-worker.js'
+import { processPendingDeliveries, pollForEventsLocked } from './plugins/webhook-worker.js'
 import { startStatusCollector } from './plugins/status-collector.js'
 import { config } from './config.js'
 import { TRUST_PROXY } from './client-ip.js'
@@ -95,12 +95,12 @@ setInterval(async () => {
 
 // Poll connectors for state changes every 5 minutes
 setInterval(async () => {
-  try { await pollForEvents(app.log) } catch (err) { app.log.error({ err }, 'Webhook event polling error') }
+  try { await pollForEventsLocked(app.log) } catch (err) { app.log.error({ err }, 'Webhook event polling error') }
 }, 5 * 60_000)
 
 // Initial poll on startup (delayed 30s to let connectors warm up)
 setTimeout(async () => {
-  try { await pollForEvents(app.log) } catch (err) { app.log.error({ err }, 'Initial webhook event polling error') }
+  try { await pollForEventsLocked(app.log) } catch (err) { app.log.error({ err }, 'Initial webhook event polling error') }
 }, 30_000)
 
 app.log.info('Webhook worker started (delivery every 1min, polling every 5min)')

@@ -103,7 +103,7 @@ The gateway polls connector HTTP endpoints every 5 minutes, diffs against `Event
 
 `GET /v1/nif` and `GET /v1/geo` are lookup-only (no events). `/v1/contracts` is an alias of `/v1/base` — subscribe to `base.contract.new`.
 
-Per-event filters live on the webhook document (`filters: { [eventName]: { [key]: value } }`). Matching is case- and accent-insensitive for `equals` / `contains_ci`. Aggregated events such as `fuel.prices.updated` send national averages unless a local filter is set, in which case only matching stations are delivered (or the event is skipped).
+Per-event filters live on the webhook document (`filters: { [eventName]: { [key]: value | value[] } }`). Location is an INE enum (name/slug/code in, code stored). Same-key values are OR; keys are AND. Aggregated events such as `fuel.prices.updated` send national averages unless a local filter is set, in which case only matching stations are delivered (or the event is skipped).
 
 See [docs/webhooks.md](docs/webhooks.md) for the event catalogue, payload headers and filter contract.
 

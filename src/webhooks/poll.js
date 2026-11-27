@@ -1,7 +1,17 @@
 import { createHash } from 'crypto'
 import { EventState, Webhook } from '../db.js'
 import { config } from '../config.js'
+import { FUEL_SLUGS } from './catalog.js'
 import { dispatchEvent } from './dispatch.js'
+import {
+  districtName,
+  getMunicipality,
+  locateMunicipality,
+  municipalityName,
+  parseBaseLocal,
+  resolveDistrict,
+  resolveMunicipality
+} from './geo-ref.js'
 
 const FETCH_TIMEOUT_MS = 8_000
 
@@ -100,6 +110,132 @@ export function nasafirmsId(h) {
   return `${lat}|${lon}|${date}|${time}|${sat}`
 }
 
+export function canonicalDate(value) {
+  if (!value) return ''
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return String(value).slice(0, 10)
+  return d.toISOString().slice(0, 10)
+}
+
+export function stableWarningId(w) {
+  const area = w.region || w.area || ''
+  const type = w.type || ''
+  const level = w.level || ''
+  return `${area}|${type}|${level}|${canonicalDate(w.startTime)}|${canonicalDate(w.endTime)}`
+}
+
+function asValues(value) {
+  if (value == null || value === '') return []
+  return Array.isArray(value) ? value : [value]
+}
+
+function unique(list) {
+  return [...new Set(list.filter(v => v != null && v !== ''))]
+}
+
+export function connectorGeoName(codeOrName, kind) {
+  if (codeOrName == null || codeOrName === '') return null
+  if (kind === 'municipality') {
+    const byCode = getMunicipality(codeOrName)
+    if (byCode) return byCode.name
+    const resolved = resolveMunicipality(codeOrName)
+    return resolved.code ? municipalityName(resolved.code) : String(codeOrName)
+  }
+  const district = resolveDistrict(codeOrName)
+  return district.code ? districtName(district.code) : String(codeOrName)
+}
+
+export function enrichMunicipality(name, district) {
+  const resolved = resolveMunicipality(name, { district })
+  const muni = resolved.code ? getMunicipality(resolved.code) : null
+  const dist = resolveDistrict(district)
+  return {
+    municipality_code: muni?.code || resolved.code || null,
+    district_code: dist.code || muni?.district_code || null
+  }
+}
+
+export function formatAnpcIncident(inc) {
+  const concelho = anpcConcelho(inc)
+  const district = anpcDistrict(inc)
+  const geo = enrichMunicipality(concelho, district)
+  return {
+    id: String(inc.id),
+    type: inc.type,
+    type_code: inc.type_code ? String(inc.type_code) : null,
+    natureza: inc.natureza || inc.type,
+    location: inc.location?.address || inc.location,
+    district,
+    district_code: geo.district_code,
+    concelho,
+    municipality_code: geo.municipality_code,
+    freguesia: inc.location?.freguesia || inc.freguesia || null,
+    status: inc.status,
+    active: inc.active,
+    reported_at: inc.reported_at || inc.datetime || inc.date
+  }
+}
+
+export function formatBaseContract(c) {
+  const nifs = extractNifs(c.nif_entidade, c.contractingEntity, c.awarded, c.nifs, c.contractingNifs, c.awardedNifs)
+  const cpv = c.cpv || (Array.isArray(c.cpvs) ? c.cpvs.map(x => x.code || x).join(' ') : null)
+  const geo = parseBaseLocal(c.local)
+  return {
+    id: String(c.id),
+    description: c.description,
+    contractingEntity: c.contractingEntity,
+    awarded: c.awarded,
+    value: c.value,
+    date: c.date,
+    type: c.type,
+    local: c.local,
+    municipality_codes: geo.municipality_codes,
+    district_codes: geo.district_codes,
+    nif_entidade: nifs[0] || null,
+    nifs,
+    cpv,
+    synced_at: c.synced_at || null
+  }
+}
+
+export function dreEmitterMunicipality(emitter) {
+  const text = String(emitter || '').trim()
+  const match = text.match(/^(Munic[íi]pio|C[âa]mara Municipal)\s+d[eoa]s?\s+(.+)$/i)
+  if (!match) return null
+  const resolved = resolveMunicipality(match[2])
+  return resolved.code || null
+}
+
+export async function enrichCoordinates(payload, lat, lon) {
+  const code = await locateMunicipality(lat, lon)
+  const muni = code ? getMunicipality(code) : null
+  return {
+    ...payload,
+    municipality_code: code,
+    district_code: muni?.district_code || null
+  }
+}
+
+export const BASE_PAGE_SIZE = 100
+export const BASE_SAFETY_CAP = 5000
+export const ANPC_PAGE_SIZE = 100
+
+function pageCount(json) {
+  return json?.pages || json?.meta?.pages || 1
+}
+
+async function fetchPaged(prefix, path, { limit = 100, maxPages = 50, extra = {} } = {}) {
+  const items = []
+  for (let page = 1; page <= maxPages; page++) {
+    const qs = new URLSearchParams({ ...extra, limit: String(limit), page: String(page) })
+    const json = await connectorGet(prefix, `${path}?${qs}`)
+    const batch = listItems(json)
+    items.push(...batch)
+    if (batch.length === 0 || page >= pageCount(json)) break
+  }
+  return items
+}
+
 /**
  * First observation of a key only stores ids/hash — never dispatches —
  * so a process restart does not replay the current snapshot.
@@ -129,7 +265,8 @@ export async function takeNewItems(stateKey, items, { idOf, cap = 500 } = {}) {
 async function dispatchNewItems(event, items, { stateKey, idOf, toPayload, cap, log, msg }) {
   const { fresh, commit } = await takeNewItems(stateKey, items, { idOf, cap })
   for (const item of fresh) {
-    await dispatchEvent(event, toPayload(item))
+    const payload = await toPayload(item)
+    await dispatchEvent(event, payload)
     log?.info({ id: idOf(item) }, msg)
   }
   await commit()
@@ -180,6 +317,18 @@ async function fetchFuelStations(params) {
   return items
 }
 
+function enrichFuelStation(s, fuel, date) {
+  const geo = enrichMunicipality(s.municipality, s.district)
+  return {
+    ...s,
+    fuel: s.fuel_slug || fuel,
+    fuel_slug: s.fuel_slug || fuel,
+    date,
+    municipality_code: geo.municipality_code,
+    district_code: geo.district_code
+  }
+}
+
 async function stationsForFuelWebhooks(webhooks, date) {
   const needed = webhooks
     .map(w => (w.filters && w.filters['fuel.prices.updated']) || {})
@@ -189,31 +338,32 @@ async function stationsForFuelWebhooks(webhooks, date) {
 
   const seen = new Set()
   const items = []
-  const defaultFuels = ['diesel', 'gasoline_95', 'gasoline_98', 'gpl_auto']
 
   for (const f of needed) {
-    const fuels = f.fuel ? [f.fuel] : defaultFuels
-    for (const fuel of fuels) {
-      const key = JSON.stringify({
-        fuel,
-        district: f.district || '',
-        municipality: f.municipality || '',
-        brand: f.brand || ''
-      })
-      if (seen.has(key)) continue
-      seen.add(key)
-      const params = { fuel }
-      if (f.district) params.district = f.district
-      if (f.municipality) params.municipality = f.municipality
-      if (f.brand) params.brand = f.brand
-      const batch = await fetchFuelStations(params)
-      for (const s of batch) {
-        items.push({
-          ...s,
-          fuel: s.fuel_slug || fuel,
-          fuel_slug: s.fuel_slug || fuel,
-          date
-        })
+    const fuels = asValues(f.fuel)
+    const fuelList = fuels.length ? fuels : FUEL_SLUGS
+    const districts = asValues(f.district)
+    const municipalities = asValues(f.municipality)
+    const brands = asValues(f.brand)
+    const districtList = districts.length ? districts : [null]
+    const municipalityList = municipalities.length ? municipalities : [null]
+    const brandList = brands.length ? brands : [null]
+
+    for (const fuel of fuelList) {
+      for (const district of districtList) {
+        for (const municipality of municipalityList) {
+          for (const brand of brandList) {
+            const key = JSON.stringify({ fuel, district, municipality, brand })
+            if (seen.has(key)) continue
+            seen.add(key)
+            const params = { fuel }
+            if (district) params.district = connectorGeoName(district, 'district')
+            if (municipality) params.municipality = connectorGeoName(municipality, 'municipality')
+            if (brand) params.brand = brand
+            const batch = await fetchFuelStations(params)
+            for (const s of batch) items.push(enrichFuelStation(s, fuel, date))
+          }
+        }
       }
     }
   }
@@ -251,9 +401,10 @@ export async function pollIPMAWarnings(log) {
   await dispatchNewItems('ipma.warning.new', listItems(json), {
     stateKey: 'ipma.warning.ids',
     cap: 400,
-    idOf: w => w.id,
+    idOf: stableWarningId,
     toPayload: w => ({
-      id: w.id,
+      id: stableWarningId(w),
+      source_id: w.id || null,
       level: w.level,
       type: w.type,
       text: w.text,
@@ -278,7 +429,7 @@ export async function pollIPMASeismic(log) {
     stateKey: 'ipma.seismic.ids',
     cap: 500,
     idOf: e => e.id,
-    toPayload: e => ({
+    toPayload: async e => enrichCoordinates({
       id: e.id,
       time: e.time,
       lat: e.lat,
@@ -289,7 +440,7 @@ export async function pollIPMASeismic(log) {
       region: e.region,
       obs_region: e.obs_region,
       sensed: e.sensed
-    }),
+    }, e.lat, e.lon),
     log,
     msg: 'New IPMA seismic event dispatched'
   })
@@ -297,28 +448,104 @@ export async function pollIPMASeismic(log) {
 
 // ─── ANPC ─────────────────────────────────────────────────────────────────────
 
+async function subscribedAnpcDistricts() {
+  const webhooks = await Webhook.find({
+    events: { $in: ['anpc.incident.new', 'anpc.incident.updated'] },
+    active: true
+  }).lean()
+  const names = []
+  for (const w of webhooks) {
+    for (const event of ['anpc.incident.new', 'anpc.incident.updated']) {
+      for (const code of asValues(w.filters?.[event]?.district)) {
+        names.push(connectorGeoName(code, 'district'))
+      }
+    }
+  }
+  return unique(names)
+}
+
+export async function fetchAnpcIncidents() {
+  const byId = new Map()
+  const add = items => {
+    for (const item of items) {
+      if (item?.id != null) byId.set(String(item.id), item)
+    }
+  }
+
+  const active = await connectorGet('/anpc', `/anpc/incidents/active?limit=${ANPC_PAGE_SIZE}`)
+  add(listItems(active))
+  add(await fetchPaged('/anpc', '/anpc/incidents', {
+    limit: ANPC_PAGE_SIZE,
+    maxPages: 10,
+    extra: { active: 'true' }
+  }))
+
+  for (const district of await subscribedAnpcDistricts()) {
+    add(await fetchPaged('/anpc', '/anpc/incidents', {
+      limit: ANPC_PAGE_SIZE,
+      maxPages: 5,
+      extra: { district, active: 'true' }
+    }))
+  }
+  return [...byId.values()]
+}
+
+function incidentFingerprint(p) {
+  return { status: p.status || null, active: Boolean(p.active) }
+}
+
+function incidentChanged(prev, next) {
+  if (!prev) return false
+  return prev.status !== next.status || Boolean(prev.active) !== Boolean(next.active)
+}
+
 export async function pollANPCIncidents(log) {
-  const json = await connectorGet('/anpc', '/anpc/incidents?limit=20')
-  if (!json) return
-  await dispatchNewItems('anpc.incident.new', listItems(json), {
-    stateKey: 'anpc.incident.ids',
-    cap: 500,
-    idOf: i => i.id,
-    toPayload: inc => ({
-      id: String(inc.id),
-      type: inc.type,
-      natureza: inc.natureza || inc.type,
-      location: inc.location?.address || inc.location,
-      district: anpcDistrict(inc),
-      concelho: anpcConcelho(inc),
-      freguesia: inc.location?.freguesia || inc.freguesia || null,
-      status: inc.status,
-      active: inc.active,
-      reported_at: inc.reported_at || inc.datetime || inc.date
-    }),
-    log,
-    msg: 'New ANPC incident event dispatched'
-  })
+  const items = await fetchAnpcIncidents()
+  const payloads = items.map(formatAnpcIncident)
+  const snapshot = Object.fromEntries(payloads.map(p => [p.id, incidentFingerprint(p)]))
+  const prevDoc = await EventState.findOne({ key: 'anpc.incident.snapshot' }).lean()
+  if (!prevDoc) {
+    await setState('anpc.incident.snapshot', snapshot)
+    return
+  }
+  const prev = prevDoc.value && typeof prevDoc.value === 'object' && !Array.isArray(prevDoc.value)
+    ? prevDoc.value
+    : {}
+
+  const prevIds = new Set(Object.keys(prev))
+  const currentIds = new Set(payloads.map(p => p.id))
+
+  for (const payload of payloads) {
+    if (!prevIds.has(payload.id)) {
+      await dispatchEvent('anpc.incident.new', payload)
+      log?.info({ id: payload.id }, 'New ANPC incident event dispatched')
+      continue
+    }
+    if (incidentChanged(prev[payload.id], incidentFingerprint(payload))) {
+      const changed = []
+      if (prev[payload.id].status !== payload.status) changed.push('status')
+      if (Boolean(prev[payload.id].active) !== Boolean(payload.active)) changed.push('active')
+      await dispatchEvent('anpc.incident.updated', { ...payload, changed })
+      log?.info({ id: payload.id }, 'ANPC incident update dispatched')
+    }
+  }
+
+  for (const [id, before] of Object.entries(prev)) {
+    if (!before.active || currentIds.has(id)) continue
+    await dispatchEvent('anpc.incident.updated', {
+      id,
+      status: before.status,
+      active: false,
+      changed: ['active']
+    })
+    log?.info({ id }, 'ANPC incident ended')
+  }
+
+  const next = { ...snapshot }
+  for (const [id, before] of Object.entries(prev)) {
+    if (before.active && !currentIds.has(id)) next[id] = { status: before.status, active: false }
+  }
+  await setState('anpc.incident.snapshot', next)
 }
 
 export async function pollANPCWarnings(log) {
@@ -341,33 +568,110 @@ export async function pollANPCWarnings(log) {
 
 // ─── BASE ─────────────────────────────────────────────────────────────────────
 
-export async function pollBASEContracts(log) {
-  const json = await connectorGet('/base', '/base/contracts?limit=20')
-  if (!json) return
-  await dispatchNewItems('base.contract.new', listItems(json), {
-    stateKey: 'base.contract.ids',
-    cap: 1000,
-    idOf: c => c.id,
-    toPayload: c => {
-      const nifs = extractNifs(c.nif_entidade, c.contractingEntity, c.awarded, c.nifs, c.contractingNifs, c.awardedNifs)
-      const cpv = c.cpv || (Array.isArray(c.cpvs) ? c.cpvs.map(x => x.code || x).join(' ') : null)
-      return {
-        id: String(c.id),
-        description: c.description,
-        contractingEntity: c.contractingEntity,
-        awarded: c.awarded,
-        value: c.value,
-        date: c.date,
-        type: c.type,
-        local: c.local,
-        nif_entidade: nifs[0] || null,
-        nifs,
-        cpv
+async function subscribedBaseMunicipalities() {
+  const webhooks = await Webhook.find({ events: 'base.contract.new', active: true }).lean()
+  const names = []
+  for (const w of webhooks) {
+    for (const code of asValues(w.filters?.['base.contract.new']?.municipality)) {
+      names.push(connectorGeoName(code, 'municipality'))
+    }
+  }
+  return unique(names)
+}
+
+function contractSyncedAt(c) {
+  return c.synced_at || c.date || null
+}
+
+export async function fetchBaseContracts({ afterSyncedAt } = {}) {
+  const byId = new Map()
+  const add = items => {
+    for (const item of items) {
+      if (item?.id != null) byId.set(String(item.id), item)
+    }
+  }
+
+  const maxPages = Math.ceil(BASE_SAFETY_CAP / BASE_PAGE_SIZE)
+  let usedCursor = false
+
+  if (afterSyncedAt) {
+    const qs = new URLSearchParams({
+      synced_after: afterSyncedAt,
+      sort: 'synced_at',
+      limit: String(BASE_PAGE_SIZE),
+      page: '1'
+    })
+    const json = await connectorGet('/base', `/base/contracts?${qs}`)
+    const batch = listItems(json)
+    const honouring = batch.length > 0 && batch.every(c => {
+      const ts = contractSyncedAt(c)
+      return ts && String(ts) >= String(afterSyncedAt)
+    })
+    if (honouring) {
+      usedCursor = true
+      add(batch)
+      for (let page = 2; page <= maxPages && byId.size < BASE_SAFETY_CAP; page++) {
+        const next = await connectorGet('/base', `/base/contracts?${new URLSearchParams({
+          synced_after: afterSyncedAt,
+          sort: 'synced_at',
+          limit: String(BASE_PAGE_SIZE),
+          page: String(page)
+        })}`)
+        const rows = listItems(next)
+        if (rows.length === 0) break
+        add(rows)
+        if (page >= pageCount(next)) break
       }
-    },
+    }
+  }
+
+  if (!usedCursor) {
+    for (let page = 1; page <= maxPages && byId.size < BASE_SAFETY_CAP; page++) {
+      const json = await connectorGet('/base', `/base/contracts?${new URLSearchParams({
+        limit: String(BASE_PAGE_SIZE),
+        page: String(page)
+      })}`)
+      const batch = listItems(json)
+      if (batch.length === 0) break
+      add(batch)
+      if (page >= pageCount(json)) break
+    }
+  }
+
+  for (const local of await subscribedBaseMunicipalities()) {
+    add(await fetchPaged('/base', '/base/contracts', {
+      limit: BASE_PAGE_SIZE,
+      maxPages: 10,
+      extra: { local }
+    }))
+  }
+
+  return [...byId.values()].slice(0, BASE_SAFETY_CAP)
+}
+
+export async function pollBASEContracts(log) {
+  const cursor = await getState('base.contract.cursor')
+  const afterSyncedAt = cursor?.syncedAfter || null
+  const items = await fetchBaseContracts({ afterSyncedAt })
+  if (items.length === 0) return
+
+  await dispatchNewItems('base.contract.new', items, {
+    stateKey: 'base.contract.ids',
+    cap: BASE_SAFETY_CAP,
+    idOf: c => c.id,
+    toPayload: formatBaseContract,
     log,
     msg: 'New BASE contract event dispatched'
   })
+
+  const maxSynced = items
+    .map(contractSyncedAt)
+    .filter(Boolean)
+    .sort()
+    .at(-1)
+  if (maxSynced) {
+    await setState('base.contract.cursor', { syncedAfter: maxSynced })
+  }
 }
 
 // ─── EV ───────────────────────────────────────────────────────────────────────
@@ -510,15 +814,22 @@ export async function pollDREDiplomas(log) {
     stateKey: 'dre.diploma.ids',
     cap: 400,
     idOf: dreId,
-    toPayload: d => ({
-      id: String(dreId(d)),
-      title: d.title || d.titulo || d.summary || d.text,
-      series: d.series != null ? String(d.series) : '1',
-      number: d.number || d.numero,
-      date: d.date || d.data,
-      type: d.type || d.tipo,
-      url: d.url
-    }),
+    toPayload: d => {
+      const emitter = d.emitter || d.emitente || d.entidade || null
+      const summary = d.summary || d.sumario || d.text || null
+      return {
+        id: String(dreId(d)),
+        title: d.title || d.titulo || summary,
+        summary,
+        emitter,
+        emitter_municipality: dreEmitterMunicipality(emitter),
+        series: d.series != null ? String(d.series) : 'I',
+        number: d.number || d.numero,
+        date: d.date || d.data,
+        type: d.type || d.tipo,
+        url: d.url
+      }
+    },
     log,
     msg: 'New DRE diploma event dispatched'
   })
@@ -537,18 +848,22 @@ export async function pollNasaFirms(log) {
     stateKey: 'nasafirms.fire.ids',
     cap: 1000,
     idOf: nasafirmsId,
-    toPayload: h => ({
-      id: nasafirmsId(h),
-      latitude: h.latitude ?? h.lat,
-      longitude: h.longitude ?? h.lon ?? h.lng,
-      acq_date: h.acq_date || h.date,
-      acq_time: h.acq_time,
-      satellite: h.satellite,
-      instrument: h.instrument,
-      confidence: h.confidence,
-      frp: h.frp,
-      source: h.source || h.instrument || h.satellite
-    }),
+    toPayload: async h => {
+      const latitude = h.latitude ?? h.lat
+      const longitude = h.longitude ?? h.lon ?? h.lng
+      return enrichCoordinates({
+        id: nasafirmsId(h),
+        latitude,
+        longitude,
+        acq_date: h.acq_date || h.date,
+        acq_time: h.acq_time,
+        satellite: h.satellite,
+        instrument: h.instrument,
+        confidence: h.confidence,
+        frp: h.frp,
+        source: h.source || h.instrument || h.satellite
+      }, latitude, longitude)
+    },
     log,
     msg: 'New NASA FIRMS hotspot dispatched'
   })

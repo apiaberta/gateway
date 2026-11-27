@@ -17,12 +17,14 @@ export async function dispatchEvent(event, payload, options = {}) {
     const eventFilters = (w.filters && w.filters[event]) || {}
     const shaped = shapeEventPayload(event, payload, eventFilters, options)
     if (shaped == null) continue
+    const timestamp = new Date()
     deliveries.push({
       webhookId: w._id,
       event,
       payload: shaped,
+      timestamp,
       status: 'pending',
-      nextRetry: new Date()
+      nextRetry: timestamp
     })
   }
 
