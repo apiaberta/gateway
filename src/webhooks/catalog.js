@@ -730,7 +730,7 @@ export function publicEventCatalog() {
 export function serializeWebhook(doc) {
   const w = doc.toObject ? doc.toObject() : doc
   return {
-    id: w._id,
+    id: String(w._id),
     url: w.url,
     events: w.events,
     filters: w.filters && typeof w.filters === 'object' && !Array.isArray(w.filters) ? w.filters : {},

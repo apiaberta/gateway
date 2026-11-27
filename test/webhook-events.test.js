@@ -329,13 +329,20 @@ test('POST /v1/webhooks stores filters; GET lists them; PATCH updates', async ()
   assert.equal(body.filters['base.contract.new'].municipality, '0504')
   assert.equal(body.filters['fuel.prices.updated'].municipality, '0504')
   assert.equal(body.active, true)
-  assert.match(body.secret, /^whsec_/)
+  assert.match(body.secret, /^whsec_[A-Za-z0-9_-]{32}$/)
+  assert.equal(typeof body.note, 'string')
+  assert.ok(body.note.length > 0)
+  assert.equal(body.data, undefined, 'secret is top-level, not nested under data')
 
   const listed = await app.inject({ method: 'GET', url: '/v1/webhooks', headers })
   assert.equal(listed.statusCode, 200)
   const list = listed.json()
   assert.equal(list.data[0].filters['fuel.prices.updated'].fuel, 'diesel')
   assert.equal(list.data[0].secret, undefined)
+
+  const detail = await app.inject({ method: 'GET', url: `/v1/webhooks/${body.id}`, headers })
+  assert.equal(detail.statusCode, 200)
+  assert.equal(detail.json().secret, undefined)
 
   const patched = await app.inject({
     method: 'PATCH',
@@ -481,5 +488,79 @@ test('ANPC status change dispatches incident.updated', async () => {
   assert.equal(deliveries.length, 1)
   assert.equal(deliveries[0].event, 'anpc.incident.updated')
   assert.deepEqual(deliveries[0].payload.changed, ['status'])
+})
+
+test('POST /v1/webhooks/:id/rotate-secret rotates for the owner and 404s for anyone else', async () => {
+  const owner = await seedDeveloper()
+  const other = await Developer.create({
+    email: 'other@example.com',
+    passwordHash: 'x',
+    apiKey: 'ak_other_webhooks',
+    name: 'Other'
+  })
+  const app = await buildApp()
+  const ownerHeaders = { 'x-api-key': owner.apiKey, 'content-type': 'application/json' }
+
+  const created = await app.inject({
+    method: 'POST',
+    url: '/v1/webhooks',
+    headers: ownerHeaders,
+    payload: { url: 'https://example.com/hook', events: ['ipma.warning.new'] }
+  })
+  assert.equal(created.statusCode, 201, created.body)
+  const original = created.json()
+  assert.match(original.secret, /^whsec_[A-Za-z0-9_-]{32}$/)
+  const webhookId = original.id
+
+  const unauth = await app.inject({
+    method: 'POST',
+    url: `/v1/webhooks/${webhookId}/rotate-secret`
+  })
+  assert.equal(unauth.statusCode, 401)
+
+  const stolen = await app.inject({
+    method: 'POST',
+    url: `/v1/webhooks/${webhookId}/rotate-secret`,
+    headers: { 'x-api-key': other.apiKey }
+  })
+  assert.equal(stolen.statusCode, 404)
+  const storedAfterTheft = await Webhook.findById(webhookId).lean()
+  assert.equal(storedAfterTheft.secret, original.secret)
+
+  const rotated = await app.inject({
+    method: 'POST',
+    url: `/v1/webhooks/${webhookId}/rotate-secret`,
+    headers: ownerHeaders
+  })
+  assert.equal(rotated.statusCode, 200, rotated.body)
+  const body = rotated.json()
+  assert.deepEqual(Object.keys(body).sort(), ['id', 'note', 'secret'])
+  assert.equal(body.id, webhookId)
+  assert.match(body.secret, /^whsec_[A-Za-z0-9_-]{32}$/)
+  assert.notEqual(body.secret, original.secret)
+  assert.equal(typeof body.note, 'string')
+  assert.match(body.note, /previous secret is invalid immediately/i)
+
+  const stored = await Webhook.findById(webhookId).lean()
+  assert.equal(stored.secret, body.secret)
+  assert.notEqual(stored.secret, original.secret)
+
+  const listed = await app.inject({ method: 'GET', url: '/v1/webhooks', headers: ownerHeaders })
+  assert.equal(listed.json().data[0].secret, undefined)
+  const detail = await app.inject({
+    method: 'GET',
+    url: `/v1/webhooks/${webhookId}`,
+    headers: ownerHeaders
+  })
+  assert.equal(detail.json().secret, undefined)
+
+  const missing = await app.inject({
+    method: 'POST',
+    url: '/v1/webhooks/000000000000000000000000/rotate-secret',
+    headers: ownerHeaders
+  })
+  assert.equal(missing.statusCode, 404)
+
+  await app.close()
 })
 
