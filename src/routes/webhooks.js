@@ -15,6 +15,13 @@ import { WebhookValidationError, validateWebhookBody } from '../webhooks/validat
 
 export { SUPPORTED_EVENTS }
 
+function newSigningSecret() {
+  return `whsec_${nanoid(32)}`
+}
+
+const SECRET_CREATE_NOTE = 'Store the secret securely — it will not be shown again. Use it to verify webhook signatures.'
+const SECRET_ROTATE_NOTE = 'Store the secret securely — it will not be shown again. The previous secret is invalid immediately. Use it to verify webhook signatures.'
+
 const FILTERS_SCHEMA = {
   type: 'object',
   additionalProperties: {
@@ -110,6 +117,17 @@ async function ensureActiveLimit(apiKey, extraActive) {
 }
 
 export async function webhookRoutes(app) {
+  // POST /:id/rotate-secret and /:id/test have no body; clients often still send
+  // Content-Type: application/json. Treat an empty JSON body as {}.
+  const jsonParser = app.getDefaultJsonParser('error', 'error')
+  app.removeContentTypeParser('application/json')
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, done) => {
+    if (body == null || body.length === 0) {
+      done(null, {})
+      return
+    }
+    jsonParser(req, body, done)
+  })
 
   // GET /v1/webhooks/events — list supported events (static path before /:id)
   app.get('/events', {
@@ -135,7 +153,7 @@ export async function webhookRoutes(app) {
   // POST /v1/webhooks — create subscription
   app.post('/', {
     schema: {
-      description: 'Register a webhook endpoint to receive real-time event notifications',
+      description: 'Register a webhook endpoint to receive real-time event notifications. The signing secret is returned only in this response (top-level `secret`).',
       tags: ['Webhooks'],
       body: {
         type: 'object',
@@ -154,6 +172,23 @@ export async function webhookRoutes(app) {
           },
           filters: FILTERS_SCHEMA
         }
+      },
+      response: {
+        201: {
+          type: 'object',
+          required: ['id', 'url', 'events', 'filters', 'active', 'secret', 'note'],
+          properties: {
+            id: { type: 'string' },
+            url: { type: 'string' },
+            events: { type: 'array', items: { type: 'string' } },
+            filters: { type: 'object', additionalProperties: true },
+            active: { type: 'boolean' },
+            createdAt: { type: 'string' },
+            updatedAt: { type: 'string' },
+            secret: { type: 'string', description: 'Signing secret (`whsec_…`). Returned only here and on rotate-secret.' },
+            note: { type: 'string' }
+          }
+        }
       }
     }
   }, async (req, reply) => {
@@ -171,7 +206,7 @@ export async function webhookRoutes(app) {
       return sendValidationError(reply, err)
     }
 
-    const secret = `whsec_${nanoid(32)}`
+    const secret = newSigningSecret()
     const webhook = await Webhook.create({
       developerId: dev._id,
       apiKey: dev.apiKey,
@@ -186,7 +221,7 @@ export async function webhookRoutes(app) {
     return {
       ...serializeWebhook(webhook),
       secret,
-      note: 'Store the secret securely — it will not be shown again. Use it to verify webhook signatures.'
+      note: SECRET_CREATE_NOTE
     }
   })
 
@@ -238,6 +273,43 @@ export async function webhookRoutes(app) {
     await webhook.save()
 
     return serializeWebhook(webhook)
+  })
+
+  // POST /v1/webhooks/:id/rotate-secret — replace signing secret immediately
+  app.post('/:id/rotate-secret', {
+    schema: {
+      description: 'Rotate the webhook signing secret. The previous secret is invalid immediately. The new secret is returned only in this response (top-level `secret`).',
+      tags: ['Webhooks'],
+      params: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+      response: {
+        200: {
+          type: 'object',
+          required: ['id', 'secret', 'note'],
+          properties: {
+            id: { type: 'string' },
+            secret: { type: 'string', description: 'New signing secret (`whsec_…`). Returned only here.' },
+            note: { type: 'string' }
+          }
+        }
+      }
+    }
+  }, async (req, reply) => {
+    const dev = await resolveDeveloper(req, reply)
+    if (reply.sent) return
+
+    const webhook = await Webhook.findOne({ _id: req.params.id, apiKey: dev.apiKey })
+    if (!webhook) return reply.code(404).send({ error: 'Not Found', message: 'Webhook not found' })
+
+    const secret = newSigningSecret()
+    webhook.secret = secret
+    webhook.updatedAt = new Date()
+    await webhook.save()
+
+    return {
+      id: String(webhook._id),
+      secret,
+      note: SECRET_ROTATE_NOTE
+    }
   })
 
   // POST /v1/webhooks/:id/test — send a test delivery

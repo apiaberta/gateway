@@ -24,12 +24,49 @@ Dev and tests never use the production database: unit tests spin up `mongodb-mem
 | GET | `/v1/webhooks/:id` | JWT or `X-API-Key` | — |
 | PATCH | `/v1/webhooks/:id` | JWT or `X-API-Key` | `{ url?, events?, filters?, active? }` |
 | DELETE | `/v1/webhooks/:id` | JWT or `X-API-Key` | deactivates |
+| POST | `/v1/webhooks/:id/rotate-secret` | JWT or `X-API-Key` | — |
 | POST | `/v1/webhooks/:id/test` | JWT or `X-API-Key` | test ping |
 | GET | `/v1/webhooks/:id/deliveries` | JWT or `X-API-Key` | last 20 attempts |
 
-`url` must be `https://`. Max 10 active webhooks per account. The signing secret (`whsec_…`) is returned **once** on POST.
+`url` must be `https://`. Max 10 active webhooks per account. Ownership is the authenticated account: a webhook that is not yours is **404**, not 403.
 
-`GET /v1/webhooks` and `GET /v1/webhooks/:id` include `filters` and `active`.
+The signing secret is a `whsec_` + 32-character nanoid string. It is returned **only** in two responses, always as the top-level field `secret` (not nested under `data`). `GET /v1/webhooks` and `GET /v1/webhooks/:id` never include `secret`.
+
+### Create response (`POST /v1/webhooks` → 201)
+
+Read `secret` from this body. A later GET will not have it.
+
+```json
+{
+  "id": "6560f1c2a1b2c3d4e5f60789",
+  "url": "https://example.com/hooks/apiaberta",
+  "events": ["base.contract.new"],
+  "filters": {
+    "base.contract.new": { "municipality": "0504" }
+  },
+  "active": true,
+  "createdAt": "2026-11-27T08:00:00.000Z",
+  "updatedAt": "2026-11-27T08:00:00.000Z",
+  "secret": "whsec_V1StGXR8_Z5jdHi6B-myT0123456789a",
+  "note": "Store the secret securely — it will not be shown again. Use it to verify webhook signatures."
+}
+```
+
+`secret` is always `whsec_` plus 32 URL-safe nanoid characters (`A-Za-z0-9_-`).
+
+### Rotate-secret response (`POST /v1/webhooks/:id/rotate-secret` → 200)
+
+No request body (an empty JSON body with `Content-Type: application/json` is accepted). Generates a new `whsec_…`, overwrites the stored secret, and returns **only** these three fields. The previous secret is invalid **immediately** (no grace period). Deliveries after this call are signed with the new secret.
+
+```json
+{
+  "id": "6560f1c2a1b2c3d4e5f60789",
+  "secret": "whsec_xK9mN2pQ7rS4tU8vW1yZ3aB6cD0eF5gH",
+  "note": "Store the secret securely — it will not be shown again. The previous secret is invalid immediately. Use it to verify webhook signatures."
+}
+```
+
+`GET /v1/webhooks` and `GET /v1/webhooks/:id` include `filters` and `active`, and omit `secret`.
 
 `GET /v1/webhooks/events` is cached for 1 hour (`Cache-Control: public, max-age=3600` + `ETag`). Each event has `geo_precision` (`municipality` | `district` | `coordinates` | `none`). Each filter has `type`, `multiple`, and when relevant `precision`, `free_text`, `options` or `options_source`. Large geo lists are not inlined: `options_source` is `/v1/geo/municipalities` or `/v1/geo/districts`. The payload also has `refs.municipalities` and `refs.districts` for comboboxes.
 

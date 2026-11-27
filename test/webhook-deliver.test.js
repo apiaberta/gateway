@@ -192,3 +192,67 @@ test('dispatchEvent stores a stable timestamp used by the worker', async () => {
   assert.ok(row.timestamp)
   assert.equal(row.status, 'pending')
 })
+
+test('deliveries after rotate-secret are signed with the new secret only', async () => {
+  const { dev, webhook: leftover } = await seed()
+  await leftover.deleteOne()
+  const app = Fastify({ logger: false })
+  await app.register(webhookRoutes, { prefix: '/v1/webhooks' })
+  await app.ready()
+  const headers = { 'x-api-key': dev.apiKey, 'content-type': 'application/json' }
+
+  const created = await app.inject({
+    method: 'POST',
+    url: '/v1/webhooks',
+    headers,
+    payload: { url: 'https://example.com/hook', events: ['ipma.warning.new'] }
+  })
+  assert.equal(created.statusCode, 201, created.body)
+  const originalSecret = created.json().secret
+  const webhookId = created.json().id
+
+  const rotated = await app.inject({
+    method: 'POST',
+    url: `/v1/webhooks/${webhookId}/rotate-secret`,
+    headers
+  })
+  assert.equal(rotated.statusCode, 200, rotated.body)
+  const newSecret = rotated.json().secret
+  assert.notEqual(newSecret, originalSecret)
+
+  const captured = []
+  origFetch = origFetch || globalThis.fetch
+  globalThis.fetch = async (url, init) => {
+    captured.push({ url: String(url), init })
+    return { ok: true, status: 200, text: async () => 'ok' }
+  }
+
+  const ping = await app.inject({
+    method: 'POST',
+    url: `/v1/webhooks/${webhookId}/test`,
+    headers
+  })
+  assert.equal(ping.statusCode, 200, ping.body)
+  assert.equal(captured.length, 1)
+  const pingBody = captured[0].init.body
+  const pingUnix = captured[0].init.headers['X-ApiAberta-Timestamp']
+  const pingNew = signaturesFor(newSecret, pingBody, pingUnix)
+  const pingOld = signaturesFor(originalSecret, pingBody, pingUnix)
+  assert.equal(captured[0].init.headers['X-ApiAberta-Signature'], pingNew.v1)
+  assert.equal(captured[0].init.headers['X-ApiAberta-Signature-V2'], pingNew.v2)
+  assert.notEqual(captured[0].init.headers['X-ApiAberta-Signature'], pingOld.v1)
+
+  captured.length = 0
+  await dispatchEvent('ipma.warning.new', { id: 'x', level: 'red', region: 'LSB', type: 'Vento' })
+  await processPendingDeliveries()
+  assert.equal(captured.length, 1)
+  const workerBody = captured[0].init.body
+  const workerUnix = captured[0].init.headers['X-ApiAberta-Timestamp']
+  const workerNew = signaturesFor(newSecret, workerBody, workerUnix)
+  const workerOld = signaturesFor(originalSecret, workerBody, workerUnix)
+  assert.equal(captured[0].init.headers['X-ApiAberta-Signature'], workerNew.v1)
+  assert.equal(captured[0].init.headers['X-ApiAberta-Signature-V2'], workerNew.v2)
+  assert.notEqual(captured[0].init.headers['X-ApiAberta-Signature'], workerOld.v1)
+
+  await app.close()
+})
