@@ -12,6 +12,7 @@ import {
   pollFuelPrices,
   pollForEvents,
   pollIPMAWarnings,
+  stableWarningId,
   takeNewItems
 } from '../src/webhooks/poll.js'
 import { publicEventCatalog, SUPPORTED_EVENTS } from '../src/webhooks/catalog.js'
@@ -144,7 +145,9 @@ test('IPMA poll is idempotent on first snapshot then dispatches new ids', async 
   const deliveries = await WebhookDelivery.find().lean()
   assert.equal(deliveries.length, 1)
   assert.equal(deliveries[0].event, 'ipma.warning.new')
-  assert.equal(deliveries[0].payload.id, 'FAR|Vento|2')
+  assert.equal(deliveries[0].payload.id, stableWarningId({
+    region: 'FAR', type: 'Vento', level: 'red', startTime: 't2', endTime: 't3'
+  }))
   assert.equal(deliveries[0].status, 'pending')
 })
 
@@ -170,11 +173,11 @@ test('IPMA region filter skips non-matching warnings', async () => {
   assert.equal(deliveries[0].payload.region, 'LSB')
 })
 
-test('BASE poll maps local and NIF and applies contains_ci / gte filters', async () => {
+test('BASE poll maps local and NIF and applies municipality / gte filters', async () => {
   const dev = await seedDeveloper()
   await seedWebhook(dev, {
     events: ['base.contract.new'],
-    filters: { 'base.contract.new': { local: 'Fundão', valor_min: 10000 } }
+    filters: { 'base.contract.new': { municipality: '0504', valor_min: 10000 } }
   })
   await EventState.create({ key: 'base.contract.ids', value: ['1'] })
 
@@ -192,6 +195,7 @@ test('BASE poll maps local and NIF and applies contains_ci / gte filters', async
   assert.equal(deliveries.length, 1)
   assert.equal(deliveries[0].payload.id, '2')
   assert.equal(deliveries[0].payload.nif_entidade, '505690173')
+  assert.deepEqual(deliveries[0].payload.municipality_codes, ['0504'])
   assert.match(deliveries[0].payload.local, /Fundão/)
 })
 
@@ -199,10 +203,9 @@ test('ANPC poll flattens concelho from location.address', async () => {
   const dev = await seedDeveloper()
   await seedWebhook(dev, {
     events: ['anpc.incident.new'],
-    filters: { 'anpc.incident.new': { concelho: 'Castro Verde' } }
+    filters: { 'anpc.incident.new': { municipality: '0206' } }
   })
-  await EventState.create({ key: 'anpc.incident.ids', value: [] })
-  // empty array is a seeded state (not null) — new ids must dispatch
+  await EventState.create({ key: 'anpc.incident.snapshot', value: {} })
   mockFetch({
     '/anpc/incidents': {
       data: [{
@@ -218,6 +221,7 @@ test('ANPC poll flattens concelho from location.address', async () => {
   const deliveries = await WebhookDelivery.find().lean()
   assert.equal(deliveries.length, 1)
   assert.equal(deliveries[0].payload.concelho, 'Castro Verde')
+  assert.equal(deliveries[0].payload.municipality_code, '0206')
   assert.equal(deliveries[0].payload.district, 'Beja')
 })
 
@@ -225,7 +229,7 @@ test('fuel poll seeds the date then dispatches stations for local filters', asyn
   const dev = await seedDeveloper()
   await seedWebhook(dev, {
     events: ['fuel.prices.updated'],
-    filters: { 'fuel.prices.updated': { municipality: 'Fundão', fuel: 'diesel' } }
+    filters: { 'fuel.prices.updated': { municipality: '0504', fuel: 'diesel' } }
   })
 
   const prices = {
@@ -322,7 +326,8 @@ test('POST /v1/webhooks stores filters; GET lists them; PATCH updates', async ()
   })
   assert.equal(created.statusCode, 201, created.body)
   const body = created.json()
-  assert.equal(body.filters['base.contract.new'].local, 'Fundão')
+  assert.equal(body.filters['base.contract.new'].municipality, '0504')
+  assert.equal(body.filters['fuel.prices.updated'].municipality, '0504')
   assert.equal(body.active, true)
   assert.match(body.secret, /^whsec_/)
 
@@ -345,7 +350,7 @@ test('POST /v1/webhooks stores filters; GET lists them; PATCH updates', async ()
   assert.equal(patched.statusCode, 200, patched.body)
   const updated = patched.json()
   assert.deepEqual(updated.events, ['base.contract.new'])
-  assert.equal(updated.filters['base.contract.new'].local, 'Lisboa')
+  assert.equal(updated.filters['base.contract.new'].municipality, '1106')
   assert.equal(updated.filters['base.contract.new'].valor_min, 1000)
   assert.equal(updated.filters['fuel.prices.updated'], undefined)
   assert.equal(updated.active, true)
@@ -374,6 +379,107 @@ test('POST /v1/webhooks stores filters; GET lists them; PATCH updates', async ()
   assert.ok(catalog.events[0].filters)
   assert.ok(catalog.lookup_only.some(s => s.service === '/v1/nif'))
   assert.ok(SUPPORTED_EVENTS.includes('parlamento.iniciativa.new'))
+  assert.ok(catalog.refs?.municipalities?.length >= 308)
+  assert.ok(catalog.events.find(e => e.name === 'base.contract.new').filters.find(f => f.key === 'municipality').options_source)
 
   await app.close()
 })
+
+test('BASE poller pages past 20 and dispatches every new contract', async () => {
+  const dev = await seedDeveloper()
+  await seedWebhook(dev, { events: ['base.contract.new'] })
+  await EventState.create({ key: 'base.contract.ids', value: ['old'] })
+
+  const contracts = Array.from({ length: 1047 }, (_, i) => ({
+    id: String(2000 + i),
+    description: `c${i}`,
+    contractingEntity: '505456010 - X',
+    awarded: '123456789 - Y',
+    value: 10,
+    date: '2026-11-26',
+    type: 'Ajuste Direto',
+    local: 'Portugal, Castelo Branco, Fundão',
+    synced_at: '2026-11-27T03:00:00.000Z'
+  }))
+
+  let maxLimit = 0
+  let pagesSeen = new Set()
+  mockFetch({
+    '/base/contracts': href => {
+      const url = new URL(href, 'http://gateway.test')
+      const limit = Number(url.searchParams.get('limit') || 20)
+      const page = Number(url.searchParams.get('page') || 1)
+      maxLimit = Math.max(maxLimit, limit)
+      pagesSeen.add(page)
+      const start = (page - 1) * limit
+      return {
+        total: contracts.length,
+        page,
+        limit,
+        pages: Math.ceil(contracts.length / limit),
+        data: contracts.slice(start, start + limit)
+      }
+    }
+  })
+
+  await pollBASEContracts()
+  const deliveries = await WebhookDelivery.find().lean()
+  assert.ok(maxLimit >= 100, `expected pagination limit >= 100, got ${maxLimit}`)
+  assert.ok(pagesSeen.size > 1, 'expected more than one page')
+  assert.equal(deliveries.length, 1047)
+})
+
+test('IPMA re-issue with a new start/end does not duplicate a stable warning', async () => {
+  const dev = await seedDeveloper()
+  await seedWebhook(dev, { events: ['ipma.warning.new'] })
+  const warning = {
+    id: 'CBO|Vento|2026-11-26T19:47:00|2026-11-29T19:00:00',
+    level: 'yellow',
+    type: 'Vento',
+    region: 'CBO',
+    startTime: '2026-11-26T19:47:00.000Z',
+    endTime: '2026-11-29T19:00:00.000Z'
+  }
+  mockFetch({ '/ipma/warnings': { data: [warning] } })
+  await pollIPMAWarnings()
+  assert.equal(await WebhookDelivery.countDocuments(), 0)
+
+  mockFetch({
+    '/ipma/warnings': {
+      data: [{
+        ...warning,
+        id: 'CBO|Vento|2026-11-26T20:12:00|2026-11-29T19:00:00',
+        startTime: '2026-11-26T20:12:00.000Z'
+      }]
+    }
+  })
+  await pollIPMAWarnings()
+  assert.equal(await WebhookDelivery.countDocuments(), 0)
+})
+
+test('ANPC status change dispatches incident.updated', async () => {
+  const dev = await seedDeveloper()
+  await seedWebhook(dev, { events: ['anpc.incident.new', 'anpc.incident.updated'] })
+  await EventState.create({
+    key: 'anpc.incident.snapshot',
+    value: { '20261676440': { status: 'Em Curso', active: true } }
+  })
+  mockFetch({
+    '/anpc/incidents': {
+      data: [{
+        id: '20261676440',
+        type: 'Prevenção a Queimadas',
+        type_code: '4335',
+        status: 'Em Resolução',
+        active: true,
+        location: { district: 'Beja', address: 'Beja, Castro Verde, Entradas' }
+      }]
+    }
+  })
+  await pollANPCIncidents()
+  const deliveries = await WebhookDelivery.find().lean()
+  assert.equal(deliveries.length, 1)
+  assert.equal(deliveries[0].event, 'anpc.incident.updated')
+  assert.deepEqual(deliveries[0].payload.changed, ['status'])
+})
+

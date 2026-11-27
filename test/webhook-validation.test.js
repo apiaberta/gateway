@@ -13,7 +13,7 @@ import {
 } from '../src/webhooks/catalog.js'
 import { config } from '../src/config.js'
 
-test('POST requires https url and events', () => {
+test('POST requires https url and events; municipality names are stored as INE codes', () => {
   assert.throws(
     () => validateWebhookBody({ url: 'http://example.com/hook', events: ['ipma.warning.new'] }),
     WebhookValidationError
@@ -25,11 +25,30 @@ test('POST requires https url and events', () => {
   const ok = validateWebhookBody({
     url: 'https://example.com/hook',
     events: ['base.contract.new'],
-    filters: { 'base.contract.new': { local: 'Fundão' } }
+    filters: { 'base.contract.new': { municipality: 'Fundão' } }
   })
   assert.equal(ok.url, 'https://example.com/hook')
-  assert.equal(ok.filters['base.contract.new'].local, 'Fundão')
+  assert.equal(ok.filters['base.contract.new'].municipality, '0504')
   assert.equal(ok.active, true)
+})
+
+test('rejects unknown names and ambiguous Lagoa', () => {
+  assert.throws(
+    () => validateWebhookBody({
+      url: 'https://example.com/h',
+      events: ['base.contract.new'],
+      filters: { 'base.contract.new': { municipality: 'Fundao City' } }
+    }),
+    /must be a municipality/
+  )
+  assert.throws(
+    () => validateWebhookBody({
+      url: 'https://example.com/h',
+      events: ['base.contract.new'],
+      filters: { 'base.contract.new': { municipality: 'Lagoa' } }
+    }),
+    /ambiguous/
+  )
 })
 
 test('rejects unknown events and unknown filter keys', () => {
@@ -49,7 +68,7 @@ test('rejects unknown events and unknown filter keys', () => {
     () => validateWebhookBody({
       url: 'https://example.com/h',
       events: ['fuel.prices.updated'],
-      filters: { 'base.contract.new': { local: 'Fundão' } }
+      filters: { 'base.contract.new': { municipality: 'Fundão' } }
     }),
     /not in events/
   )
@@ -58,14 +77,18 @@ test('rejects unknown events and unknown filter keys', () => {
 test('enum and number filter values are coerced and validated', () => {
   const ok = validateWebhookBody({
     url: 'https://example.com/h',
-    events: ['fuel.prices.updated', 'base.contract.new'],
+    events: ['fuel.prices.updated', 'base.contract.new', 'dre.diploma.new'],
     filters: {
       'fuel.prices.updated': { fuel: 'DIESEL', municipality: 'Fundão' },
-      'base.contract.new': { valor_min: '50000' }
+      'base.contract.new': { valor_min: '50000', nif_entidade: '505456010', cpv: '45' },
+      'dre.diploma.new': { series: '2' }
     }
   })
   assert.equal(ok.filters['fuel.prices.updated'].fuel, 'diesel')
+  assert.equal(ok.filters['fuel.prices.updated'].municipality, '0504')
   assert.equal(ok.filters['base.contract.new'].valor_min, 50000)
+  assert.equal(ok.filters['base.contract.new'].nif_entidade, '505456010')
+  assert.equal(ok.filters['dre.diploma.new'].series, 'II')
 
   assert.throws(
     () => validateWebhookBody({
@@ -79,6 +102,28 @@ test('enum and number filter values are coerced and validated', () => {
     () => assertFilters({ 'base.contract.new': { valor_min: 'nope' } }, ['base.contract.new']),
     /must be a number/
   )
+  assert.throws(
+    () => validateWebhookBody({
+      url: 'https://example.com/h',
+      events: ['base.contract.new'],
+      filters: { 'base.contract.new': { nif_entidade: '111111111' } }
+    }),
+    /MOD 11/
+  )
+})
+
+test('legacy local/concelho keys convert to municipality', () => {
+  const ok = validateWebhookBody({
+    url: 'https://example.com/h',
+    events: ['base.contract.new', 'anpc.incident.new'],
+    filters: {
+      'base.contract.new': { local: 'Fundão' },
+      'anpc.incident.new': { concelho: 'Fundão' }
+    }
+  })
+  assert.equal(ok.filters['base.contract.new'].municipality, '0504')
+  assert.equal(ok.filters['base.contract.new'].local, undefined)
+  assert.equal(ok.filters['anpc.incident.new'].municipality, '0504')
 })
 
 test('PATCH is partial, prunes filters of unsubscribed events, and validates active', () => {
@@ -87,7 +132,7 @@ test('PATCH is partial, prunes filters of unsubscribed events, and validates act
     events: ['ipma.warning.new', 'base.contract.new'],
     filters: {
       'ipma.warning.new': { level: 'red' },
-      'base.contract.new': { local: 'Fundão' }
+      'base.contract.new': { municipality: '0504' }
     },
     active: true
   }
@@ -98,7 +143,7 @@ test('PATCH is partial, prunes filters of unsubscribed events, and validates act
   )
   assert.equal(patched.url, 'https://example.com/old')
   assert.deepEqual(patched.events, ['base.contract.new'])
-  assert.deepEqual(patched.filters, { 'base.contract.new': { local: 'Fundão' } })
+  assert.deepEqual(patched.filters, { 'base.contract.new': { municipality: '0504' } })
   assert.equal(patched.active, false)
 
   assert.throws(
@@ -122,17 +167,19 @@ test('GET /events catalogue has service, PT labels and typed filters', () => {
     assert.equal(typeof event.description_pt, 'string')
     assert.ok(Array.isArray(event.payload_fields))
     assert.ok(Array.isArray(event.filters))
+    assert.ok(['municipality', 'district', 'coordinates', 'none'].includes(event.geo_precision))
     assert.equal(event.payloadKeys, undefined)
     for (const filter of event.filters) {
       assert.equal(typeof filter.key, 'string')
       assert.equal(typeof filter.label_pt, 'string')
-      assert.ok(['string', 'enum', 'number'].includes(filter.type))
-      assert.ok(['equals', 'contains_ci', 'gte', 'lte'].includes(filter.match))
+      assert.equal(typeof filter.multiple, 'boolean')
+      assert.ok(['string', 'enum', 'number', 'radius'].includes(filter.type))
       if (filter.type === 'enum') {
-        assert.ok(Array.isArray(filter.options) && filter.options.length > 0)
-        assert.equal(typeof filter.options[0].value, 'string')
-        assert.equal(typeof filter.options[0].label_pt, 'string')
+        const hasOptions = Array.isArray(filter.options) && filter.options.length > 0
+        const hasSource = typeof filter.options_source === 'string'
+        assert.ok(hasOptions || hasSource, `${event.name}.${filter.key} needs options or options_source`)
       }
+      if (filter.free_text) assert.equal(filter.free_text, true)
     }
   }
 
@@ -141,6 +188,7 @@ test('GET /events catalogue has service, PT labels and typed filters', () => {
     'ipma.warning.new',
     'fuel.prices.updated',
     'anpc.incident.new',
+    'anpc.incident.updated',
     'base.contract.new',
     'ev.prices.updated',
     'dre.diploma.new',
@@ -158,9 +206,25 @@ test('GET /events catalogue has service, PT labels and typed filters', () => {
   }
 
   const base = events.find(e => e.name === 'base.contract.new')
-  assert.deepEqual(base.filters.map(f => f.key).sort(), ['cpv', 'local', 'nif_entidade', 'valor_min'].sort())
-  assert.equal(base.filters.find(f => f.key === 'local').match, 'contains_ci')
+  assert.deepEqual(base.filters.map(f => f.key).sort(), ['cpv', 'district', 'municipality', 'nif_entidade', 'valor_min'].sort())
+  const muni = base.filters.find(f => f.key === 'municipality')
+  assert.equal(muni.type, 'enum')
+  assert.equal(muni.multiple, true)
+  assert.equal(muni.precision, 'municipality')
+  assert.equal(muni.options_source, '/v1/geo/municipalities')
   assert.equal(base.filters.find(f => f.key === 'valor_min').match, 'gte')
+
+  const ipma = events.find(e => e.name === 'ipma.warning.new')
+  assert.equal(ipma.filters.some(f => f.key === 'area'), false)
+  assert.equal(ipma.filters.find(f => f.key === 'municipality').precision, 'distrito')
+  assert.ok(ipma.filters.some(f => f.key === 'min_level'))
+
+  const sns = events.find(e => e.name === 'sns.dataset.updated')
+  assert.equal(sns.filters.some(f => f.key === 'regiao'), false)
+
+  const dre = events.find(e => e.name === 'dre.diploma.new')
+  assert.equal(dre.filters.find(f => f.key === 'q').free_text, true)
+  assert.deepEqual(dre.filters.find(f => f.key === 'series').options.map(o => o.value), ['I', 'II'])
 })
 
 test('every /v1/status service is covered by an event or documented as lookup-only', () => {

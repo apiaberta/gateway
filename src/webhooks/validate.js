@@ -1,4 +1,12 @@
-import { EVENT_BY_NAME, SUPPORTED_EVENTS } from './catalog.js'
+import { EVENT_BY_NAME, SUPPORTED_EVENTS, findFilterSpec } from './catalog.js'
+import {
+  getMunicipality,
+  resolveDistrict,
+  resolveMunicipality,
+  suggestionMessage
+} from './geo-ref.js'
+import { isValidNif } from './nif.js'
+import { normalizeText } from './normalize.js'
 
 export class WebhookValidationError extends Error {
   constructor(message, details = []) {
@@ -39,7 +47,12 @@ export function assertEvents(events) {
   return [...new Set(events)]
 }
 
-export function assertFilters(filters, events) {
+function canonicalKey(eventName, key) {
+  const spec = findFilterSpec(eventName, key)
+  return spec ? spec.key : key
+}
+
+export function assertFilters(filters, events, { dropUnknown = false } = {}) {
   if (filters == null) return {}
   if (!isPlainObject(filters)) {
     throw new WebhookValidationError('filters must be an object keyed by event name')
@@ -64,13 +77,27 @@ export function assertFilters(filters, events) {
     const allowed = Object.fromEntries((def.filters || []).map(f => [f.key, f]))
     const next = {}
 
-    for (const [key, value] of Object.entries(eventFilters)) {
+    for (const [rawKey, value] of Object.entries(eventFilters)) {
       if (value == null || value === '') continue
+      const key = canonicalKey(eventName, rawKey)
       const spec = allowed[key]
       if (!spec) {
-        throw new WebhookValidationError(`Unknown filter "${key}" for ${eventName}`)
+        if (dropUnknown) continue
+        throw new WebhookValidationError(`Unknown filter "${rawKey}" for ${eventName}`)
       }
-      next[key] = coerceFilterValue(spec, value, eventName)
+      let coerced
+      try {
+        coerced = coerceFilterValue(spec, value, eventName)
+      } catch (err) {
+        if (dropUnknown && err instanceof WebhookValidationError) continue
+        throw err
+      }
+      if (coerced == null || coerced === '' || (Array.isArray(coerced) && coerced.length === 0)) continue
+      if (next[spec.key] != null) {
+        next[spec.key] = mergeFilterValues(next[spec.key], coerced)
+      } else {
+        next[spec.key] = coerced
+      }
     }
     cleaned[eventName] = next
   }
@@ -78,34 +105,115 @@ export function assertFilters(filters, events) {
   return cleaned
 }
 
+function mergeFilterValues(a, b) {
+  const list = [...(Array.isArray(a) ? a : [a]), ...(Array.isArray(b) ? b : [b])]
+  return [...new Set(list.map(String))]
+}
+
+function optionAliases(option) {
+  const aliases = [option.value, option.label_pt, ...(option.aliases || [])]
+  return aliases.filter(Boolean).map(v => normalizeText(v))
+}
+
 function coerceFilterValue(spec, value, eventName) {
+  const path = `filters.${eventName}.${spec.key}`
+
+  if (spec.type === 'radius' || spec.match === 'radius') {
+    return coerceRadius(value, path)
+  }
+
   if (spec.type === 'number') {
     const n = typeof value === 'number' ? value : Number(value)
     if (!Number.isFinite(n)) {
-      throw new WebhookValidationError(`filters.${eventName}.${spec.key} must be a number`)
+      throw new WebhookValidationError(`${path} must be a number`)
     }
     return n
   }
 
+  const values = Array.isArray(value) ? value : [value]
+  const coerced = values.map(v => coerceScalar(spec, v, path))
+  const unique = [...new Set(coerced.map(v => (typeof v === 'string' ? v : String(v))))]
+  if (unique.length === 1 && !Array.isArray(value)) return unique[0]
+  return unique
+}
+
+function coerceRadius(value, path) {
+  if (typeof value === 'string') {
+    try { value = JSON.parse(value) } catch { /* keep */ }
+  }
+  if (!isPlainObject(value)) {
+    throw new WebhookValidationError(`${path} must be { lat, lon, km }`)
+  }
+  const lat = Number(value.lat)
+  const lon = Number(value.lon ?? value.lng)
+  const km = Number(value.km)
+  if (![lat, lon, km].every(Number.isFinite) || km <= 0) {
+    throw new WebhookValidationError(`${path} must be { lat, lon, km } with km > 0`)
+  }
+  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+    throw new WebhookValidationError(`${path} has out-of-range coordinates`)
+  }
+  return { lat, lon, km }
+}
+
+function coerceScalar(spec, value, path) {
   if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') {
-    throw new WebhookValidationError(`filters.${eventName}.${spec.key} must be a scalar`)
+    throw new WebhookValidationError(`${path} must be a scalar`)
+  }
+  const asString = String(value).trim()
+
+  if (spec.resolve === 'municipality') {
+    return coerceMunicipality(asString, path)
+  }
+  if (spec.resolve === 'district') {
+    return coerceDistrict(asString, path)
+  }
+  if (spec.resolve === 'nif' || spec.key === 'nif_entidade') {
+    if (!isValidNif(asString)) {
+      throw new WebhookValidationError(`${path} must be a 9-digit NIF with a valid MOD 11 checksum`)
+    }
+    return asString
+  }
+  if (spec.pattern) {
+    const re = new RegExp(spec.pattern)
+    if (!re.test(asString)) {
+      throw new WebhookValidationError(`${path} must match ${spec.pattern}`)
+    }
+    return asString
   }
 
-  const asString = String(value)
-
   if (spec.type === 'enum' && spec.options?.length) {
-    const allowed = spec.options.map(o => o.value)
-    const ok = allowed.some(v => v.toLowerCase() === asString.toLowerCase())
-    if (!ok) {
+    const allowed = spec.options
+    const hit = allowed.find(o => optionAliases(o).includes(normalizeText(asString)))
+    if (!hit) {
       throw new WebhookValidationError(
-        `filters.${eventName}.${spec.key} must be one of: ${allowed.join(', ')}`
+        `${path} must be one of: ${allowed.map(o => o.value).join(', ')}`
       )
     }
-    const canonical = allowed.find(v => v.toLowerCase() === asString.toLowerCase())
-    return canonical
+    return hit.value
   }
 
   return asString
+}
+
+function coerceMunicipality(asString, path) {
+  const result = resolveMunicipality(asString)
+  if (result.code) return result.code
+  if (result.error === 'ambiguous') {
+    throw new WebhookValidationError(suggestionMessage(path, result), result.candidates.map(c => c.code))
+  }
+  const sample = ['0504 (Fundão)', '1106 (Lisboa)']
+  throw new WebhookValidationError(
+    `${path} must be a municipality code, slug or name, e.g. ${sample.join(', ')}`
+  )
+}
+
+function coerceDistrict(asString, path) {
+  const result = resolveDistrict(asString)
+  if (result.code) return result.code
+  throw new WebhookValidationError(
+    `${path} must be a district code (01–18, RAA, RAM) or name`
+  )
 }
 
 /**
@@ -146,11 +254,10 @@ export function validateWebhookBody(body = {}, { partial = false, current } = {}
   if (provided.filters) {
     filters = assertFilters(body.filters, events)
   } else {
-    // Drop filters for events no longer subscribed
     filters = Object.fromEntries(
       Object.entries(filters).filter(([name]) => events.includes(name))
     )
-    filters = assertFilters(filters, events)
+    filters = assertFilters(filters, events, { dropUnknown: true })
   }
 
   let active = current?.active ?? true
@@ -163,3 +270,5 @@ export function validateWebhookBody(body = {}, { partial = false, current } = {}
 
   return { url, events, filters, active }
 }
+
+export { getMunicipality }

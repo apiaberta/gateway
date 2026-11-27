@@ -8,7 +8,8 @@
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
     "lint": "eslint src/",
-    "test": "find src -name '*.js' | xargs node --check && node --test --test-concurrency=1 test/*.test.js && echo All files OK"
+    "test": "find src -name '*.js' | xargs node --check && node --test --test-concurrency=1 test/*.test.js && echo All files OK",
+    "migrate:webhook-filters": "node scripts/migrate-webhook-filters.mjs"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.0",

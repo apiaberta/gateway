@@ -1,4 +1,4 @@
-import { createHmac } from 'crypto'
+import { createHash } from 'crypto'
 import { nanoid } from 'nanoid'
 import jwt from 'jsonwebtoken'
 import { Developer, Webhook, WebhookDelivery } from '../db.js'
@@ -9,6 +9,8 @@ import {
   publicEventCatalog,
   serializeWebhook
 } from '../webhooks/catalog.js'
+import { buildEnvelope, postWebhook } from '../webhooks/deliver.js'
+import { publicGeoRefs } from '../webhooks/geo-ref.js'
 import { WebhookValidationError, validateWebhookBody } from '../webhooks/validate.js'
 
 export { SUPPORTED_EVENTS }
@@ -19,7 +21,7 @@ const FILTERS_SCHEMA = {
     type: 'object',
     additionalProperties: true
   },
-  description: 'Per-event filters, e.g. { "base.contract.new": { "local": "Fundão" } }. An event with no filters receives everything.'
+  description: 'Per-event filters, e.g. { "base.contract.new": { "municipality": "0504" } }. Arrays are OR; keys are AND. An event with no filters receives everything.'
 }
 
 // Resolve developer from JWT Bearer or API key
@@ -55,62 +57,46 @@ function sendValidationError(reply, err) {
   throw err
 }
 
-// Sign a webhook payload with HMAC-SHA256
-function signPayload(secret, payload) {
-  return createHmac('sha256', secret).update(payload).digest('hex')
-}
-
-// Deliver a payload to a webhook URL and persist the result
 async function deliverWebhook({ webhook, event, payload, isTest = false }) {
-  const body = JSON.stringify({
-    id:        `evt_${nanoid(16)}`,
-    event,
-    test:      isTest,
-    timestamp: new Date().toISOString(),
-    data:      payload
-  })
-
-  const signature = signPayload(webhook.secret, body)
-  const deliveryId = nanoid(16)
-
-  let responseCode = null
-  let status = 'failed'
-  let errorMsg = null
-
-  try {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 10000)
-    const res = await fetch(webhook.url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-ApiAberta-Event': event,
-        'X-ApiAberta-Delivery': deliveryId,
-        'X-ApiAberta-Signature': `sha256=${signature}`,
-        'User-Agent': 'ApiAberta-Webhooks/1.0'
-      },
-      body,
-      signal: controller.signal
-    })
-    clearTimeout(timer)
-    responseCode = res.status
-    status = res.ok ? 'delivered' : 'failed'
-  } catch (err) {
-    errorMsg = err.message
-    status = 'failed'
-  }
-
+  const timestamp = new Date()
   const delivery = await WebhookDelivery.create({
-    webhookId:    webhook._id,
+    webhookId: webhook._id,
     event,
-    status,
-    attempts:     1,
-    responseCode,
-    lastAttempt:  new Date(),
-    responseBody: errorMsg ? `Error: ${errorMsg}` : null
+    payload,
+    timestamp,
+    status: 'sending',
+    attempts: 1,
+    lastAttempt: timestamp
   })
 
-  return { deliveryId: delivery._id, status, responseCode, error: errorMsg }
+  const envelope = buildEnvelope({
+    event,
+    timestamp: timestamp.toISOString(),
+    data: payload,
+    test: isTest
+  })
+
+  const result = await postWebhook({
+    url: webhook.url,
+    event,
+    deliveryId: delivery._id,
+    secret: webhook.secret,
+    envelope
+  })
+
+  const status = result.ok ? 'delivered' : 'failed'
+  await WebhookDelivery.updateOne({ _id: delivery._id }, {
+    status,
+    responseCode: result.status,
+    responseBody: result.ok ? result.body : (result.body || 'Error')
+  })
+
+  return {
+    deliveryId: delivery._id,
+    status,
+    responseCode: result.status || null,
+    error: result.ok ? null : result.body
+  }
 }
 
 async function ensureActiveLimit(apiKey, extraActive) {
@@ -131,10 +117,20 @@ export async function webhookRoutes(app) {
       description: 'List supported webhook events, filters and lookup-only services',
       tags: ['Webhooks']
     }
-  }, async () => ({
-    events: publicEventCatalog(),
-    lookup_only: LOOKUP_ONLY_SERVICES
-  }))
+  }, async (req, reply) => {
+    const payload = {
+      events: publicEventCatalog(),
+      lookup_only: LOOKUP_ONLY_SERVICES,
+      refs: publicGeoRefs()
+    }
+    const etag = `"${createHash('sha256').update(JSON.stringify(payload)).digest('hex').slice(0, 16)}"`
+    reply.header('Cache-Control', 'public, max-age=3600')
+    reply.header('ETag', etag)
+    if (req.headers['if-none-match'] === etag) {
+      return reply.code(304).send()
+    }
+    return payload
+  })
 
   // POST /v1/webhooks — create subscription
   app.post('/', {
